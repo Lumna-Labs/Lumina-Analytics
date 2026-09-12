@@ -1,0 +1,87 @@
+version: "3.8"
+
+services:
+  timescaledb:
+    image: timescale/timescaledb:latest-pg16
+    container_name: lumina-timescaledb
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: lumina
+      POSTGRES_PASSWORD: lumina
+      POSTGRES_DB: lumina
+    ports:
+      - "5432:5432"
+    volumes:
+      - timescale_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U lumina"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  redis:
+    image: redis:7-alpine
+    container_name: lumina-redis
+    restart: unless-stopped
+    ports:
+      - "6379:6379"
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  api:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: lumina-api
+    restart: unless-stopped
+    command: ["lumina-api"]
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+      redis:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://lumina:lumina@timescaledb:5432/lumina
+      REDIS_URL: redis://redis:6379
+      API_BIND: 0.0.0.0:8080
+    ports:
+      - "8080:8080"
+
+  ingest:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    container_name: lumina-ingest
+    restart: unless-stopped
+    command: ["lumina-ingest"]
+    depends_on:
+      timescaledb:
+        condition: service_healthy
+    environment:
+      DATABASE_URL: postgres://lumina:lumina@timescaledb:5432/lumina
+      HORIZON_URL: https://horizon.stellar.org
+      POLL_INTERVAL_SECS: 60
+      WHALE_THRESHOLD: 10000
+      PRICE_FEED_ENABLED: "false"
+      # Uncomment and set to real, verified Blend pool contract IDs to enable
+      # liquidation-risk ingestion (see README for why this isn't guessed).
+      # BLEND_POOL_IDS: ""
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+      args:
+        VITE_API_BASE_URL: http://localhost:8080
+    container_name: lumina-frontend
+    restart: unless-stopped
+    depends_on:
+      - api
+    ports:
+      - "5173:80"
+
+volumes:
+  timescale_data:
