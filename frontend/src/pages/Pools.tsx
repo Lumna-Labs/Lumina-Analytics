@@ -1,9 +1,14 @@
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api";
-import { usePolled } from "../hooks";
+import type { PoolWithLatest } from "../api";
+import { usePolled, useSortableRows } from "../hooks";
 import { ErrorState, LoadingState } from "../components/States";
+import { SortableTh } from "../components/SortableTh";
+import { downloadCsv, toCsv } from "../csv";
 import { fmtCompact, fmtTime, pairLabel } from "../format";
+
+type SortKey = keyof PoolWithLatest;
 
 export function Pools() {
   const navigate = useNavigate();
@@ -20,6 +25,26 @@ export function Pools() {
         p.pool_id.toLowerCase().includes(q),
     );
   }, [pools.data, query]);
+
+  const { sorted, sortKey, sortDir, toggleSort } = useSortableRows<PoolWithLatest>(
+    filtered,
+    "total_shares",
+  );
+
+  function exportCsv() {
+    const csv = toCsv(sorted, [
+      "pool_id",
+      "asset_a",
+      "asset_b",
+      "fee_bp",
+      "reserve_a",
+      "reserve_b",
+      "total_shares",
+      "trustline_count",
+      "time",
+    ]);
+    downloadCsv("lumina-pools.csv", csv);
+  }
 
   return (
     <div>
@@ -44,6 +69,9 @@ export function Pools() {
         <span style={{ color: "var(--muted)", fontSize: 12.5 }}>
           {filtered.length} of {pools.data?.length ?? 0} pools
         </span>
+        <button type="button" className="export-btn" onClick={exportCsv} disabled={sorted.length === 0}>
+          Export CSV
+        </button>
       </div>
 
       {pools.loading && !pools.data ? (
@@ -53,17 +81,17 @@ export function Pools() {
           <table>
             <thead>
               <tr>
-                <th>Pair</th>
-                <th>Fee</th>
-                <th>Reserve A</th>
-                <th>Reserve B</th>
-                <th>Total Shares</th>
-                <th>Trustlines</th>
-                <th>Last Snapshot</th>
+                <SortableTh<SortKey> label="Pair" column="asset_a" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                <SortableTh<SortKey> label="Fee" column="fee_bp" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                <SortableTh<SortKey> label="Reserve A" column="reserve_a" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                <SortableTh<SortKey> label="Reserve B" column="reserve_b" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                <SortableTh<SortKey> label="Total Shares" column="total_shares" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                <SortableTh<SortKey> label="Trustlines" column="trustline_count" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                <SortableTh<SortKey> label="Last Snapshot" column="time" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
               </tr>
             </thead>
             <tbody>
-              {filtered.map((p) => (
+              {sorted.map((p) => (
                 <tr key={p.pool_id} className="clickable" onClick={() => navigate(`/pools/${p.pool_id}`)}>
                   <td>{pairLabel(p.asset_a, p.asset_b)}</td>
                   <td>{(p.fee_bp / 100).toFixed(2)}%</td>

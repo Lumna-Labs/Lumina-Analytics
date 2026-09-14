@@ -3,14 +3,26 @@ use std::time::Duration as StdDuration;
 
 use chrono::Utc;
 use rust_decimal::Decimal;
+use serde_json::json;
 use sqlx::PgPool;
 
+use lumina::alerts::{self, Severity};
 use lumina::config::Config;
 use lumina::db;
 use lumina::horizon::{HorizonClient, LiquidityPool, PaymentRecord};
 use lumina::logic;
 use lumina::pricing;
 use lumina::soroban;
+
+/// An alert-worthy event detected mid-transaction, deferred until after
+/// `tx.commit()` so recording it (a DB write plus an optional outbound
+/// webhook call) never happens while a batch-ingest transaction is open.
+struct PendingAlert {
+    kind: &'static str,
+    severity: Severity,
+    message: String,
+    details: serde_json::Value,
+}
 
 const PAYMENTS_CURSOR_KEY: &str = "horizon_payments_cursor";
 /// Safety cap on pages fetched per cycle so a huge backlog (e.g. after
@@ -55,7 +67,8 @@ async fn main() -> anyhow::Result<()> {
             tracing::error!("ingestion cycle failed: {e:?}");
         }
         if !blend_pools.is_empty() {
-            if let Err(e) = soroban::ingest_lending_cycle(&pool, &config, &blend_pools).await {
+            if let Err(e) = soroban::ingest_lending_cycle(&pool, &http, &config, &blend_pools).await
+            {
                 tracing::error!("lending ingestion cycle failed: {e:?}");
             }
         }
@@ -112,7 +125,7 @@ async fn run_once(
 
     tx.commit().await?;
 
-    ingest_payments(pool, horizon, config).await?;
+    ingest_payments(pool, horizon, http, config).await?;
 
     Ok(())
 }
@@ -125,6 +138,7 @@ async fn run_once(
 async fn ingest_payments(
     pool: &PgPool,
     horizon: &HorizonClient,
+    http: &reqwest::Client,
     config: &Config,
 ) -> anyhow::Result<()> {
     let cursor = db::get_ingest_cursor(pool, PAYMENTS_CURSOR_KEY).await?;
@@ -154,24 +168,54 @@ async fn ingest_payments(
     // duplicate inserts (harmless, they're deduped by op_id) or, worse,
     // advance the cursor past payments that never got written.
     let mut tx = pool.begin().await?;
-    let mut whales = 0;
+    let mut pending_alerts = Vec::new();
     let mut last_cursor = cursor;
     for p in &payments {
-        if ingest_whale_payment(&mut tx, p, config.whale_threshold).await? {
-            whales += 1;
+        if let Some(alert) = ingest_whale_payment(&mut tx, p, config.whale_threshold).await? {
+            pending_alerts.push(alert);
         }
         last_cursor = p.paging_token.clone();
     }
     db::set_ingest_cursor(&mut *tx, PAYMENTS_CURSOR_KEY, &last_cursor).await?;
     tx.commit().await?;
 
-    tracing::info!("recorded {whales} whale-sized payment(s) this cycle");
+    tracing::info!(
+        "recorded {} whale-sized payment(s) this cycle",
+        pending_alerts.len()
+    );
+    for alert in pending_alerts {
+        if let Err(e) = alerts::record(
+            pool,
+            http,
+            config,
+            alert.kind,
+            alert.severity,
+            alert.message,
+            alert.details,
+        )
+        .await
+        {
+            tracing::warn!("failed to record whale alert: {e:?}");
+        }
+    }
     Ok(())
 }
 
+/// Bound on how many pool-ratio hops price discovery will chase outward from
+/// XLM (XLM -> A -> B -> ...). Each hop only ever derives a price from real
+/// reserves of an asset already priced in an earlier hop, so this is a depth
+/// cap on legitimate routing, not a guess — it just stops the search once
+/// it's implausible a stable, liquid route still exists.
+const MAX_PRICE_HOPS: u32 = 4;
+
 /// Fetches XLM/USD, records it, then derives and records a USD price for
-/// every asset that pairs with native XLM in at least one tracked pool
-/// (preferring the deepest such pool when an asset appears in several).
+/// every asset reachable from native XLM through a chain of tracked classic-
+/// AMM pools (preferring, at each hop, the deepest pool that reaches a given
+/// asset). An asset one hop from XLM (paired directly with it) is priced the
+/// same as before; an asset only reachable via one or more intermediate
+/// already-priced assets is now priced too, still purely from real reserve
+/// ratios — never guessed. Assets with no path back to XLM through any
+/// tracked pool stay unpriced.
 async fn ingest_prices(
     tx: &mut sqlx::PgConnection,
     http: &reqwest::Client,
@@ -182,36 +226,64 @@ async fn ingest_prices(
     let xlm_usd = pricing::fetch_xlm_usd(http, &config.coingecko_api_url).await?;
     db::insert_asset_price(&mut *tx, now, "XLM", "", xlm_usd, "coingecko").await?;
 
-    let mut best: std::collections::HashMap<pricing::AssetId, (Decimal, Decimal)> =
+    let native: pricing::AssetId = ("XLM".to_string(), String::new());
+    let mut priced: std::collections::HashMap<pricing::AssetId, Decimal> =
         std::collections::HashMap::new();
-    for lp in pools {
-        let (Some(a), Some(b)) = (lp.reserves.first(), lp.reserves.get(1)) else {
-            continue;
-        };
-        let Ok(reserve_a) = Decimal::from_str(&a.amount) else {
-            continue;
-        };
-        let Ok(reserve_b) = Decimal::from_str(&b.amount) else {
-            continue;
-        };
-        let Some((asset, price, weight)) =
-            pricing::price_from_native_pair(&a.asset, reserve_a, &b.asset, reserve_b, xlm_usd)
-        else {
-            continue;
-        };
-        best.entry(asset)
-            .and_modify(|(best_weight, best_price)| {
-                if weight > *best_weight {
-                    *best_weight = weight;
-                    *best_price = price;
+    priced.insert(native.clone(), xlm_usd);
+
+    let reserves: Vec<(String, Decimal, String, Decimal)> = pools
+        .iter()
+        .filter_map(|lp| {
+            let (a, b) = (lp.reserves.first()?, lp.reserves.get(1)?);
+            let reserve_a = Decimal::from_str(&a.amount).ok()?;
+            let reserve_b = Decimal::from_str(&b.amount).ok()?;
+            Some((a.asset.clone(), reserve_a, b.asset.clone(), reserve_b))
+        })
+        .collect();
+
+    for hop in 0..MAX_PRICE_HOPS {
+        let mut newly: std::collections::HashMap<pricing::AssetId, (Decimal, Decimal)> =
+            std::collections::HashMap::new();
+        for (asset_a, reserve_a, asset_b, reserve_b) in &reserves {
+            for (known_asset, known_price) in &priced {
+                let Some((asset, price, weight)) = pricing::price_from_known_leg(
+                    asset_a,
+                    *reserve_a,
+                    asset_b,
+                    *reserve_b,
+                    known_asset,
+                    *known_price,
+                ) else {
+                    continue;
+                };
+                if priced.contains_key(&asset) {
+                    continue; // already priced in an earlier (shorter) hop.
                 }
-            })
-            .or_insert((weight, price));
+                newly
+                    .entry(asset)
+                    .and_modify(|(best_weight, best_price)| {
+                        if weight > *best_weight {
+                            *best_weight = weight;
+                            *best_price = price;
+                        }
+                    })
+                    .or_insert((weight, price));
+            }
+        }
+        if newly.is_empty() {
+            break;
+        }
+        let source = if hop == 0 {
+            "xlm_pool_ratio"
+        } else {
+            "multi_hop_pool_ratio"
+        };
+        for ((code, issuer), (_, price)) in newly {
+            db::insert_asset_price(&mut *tx, now, &code, &issuer, price, source).await?;
+            priced.insert((code, issuer), price);
+        }
     }
 
-    for ((code, issuer), (_, price)) in best {
-        db::insert_asset_price(&mut *tx, now, &code, &issuer, price, "xlm_pool_ratio").await?;
-    }
     Ok(())
 }
 
@@ -243,19 +315,20 @@ async fn ingest_pool(
     Ok(())
 }
 
-/// Returns true if the payment met the whale threshold and was recorded.
+/// Returns a pending alert if the payment met the whale threshold and was
+/// newly recorded (not a cursor-replay duplicate of one already stored).
 async fn ingest_whale_payment(
     tx: &mut sqlx::PgConnection,
     p: &PaymentRecord,
     threshold: f64,
-) -> anyhow::Result<bool> {
+) -> anyhow::Result<Option<PendingAlert>> {
     let Some(raw_amount) = &p.amount else {
-        return Ok(false);
+        return Ok(None);
     };
     let amount = Decimal::from_str(raw_amount)?;
     let threshold = Decimal::try_from(threshold).unwrap_or_default();
     let Some(amount) = logic::whale_amount(&p.op_type, Some(amount), threshold) else {
-        return Ok(false);
+        return Ok(None);
     };
 
     let (asset_code, asset_issuer) = logic::resolve_payment_asset(
@@ -269,7 +342,7 @@ async fn ingest_whale_payment(
         .or_else(|| p.source_account.clone())
         .unwrap_or_default();
 
-    db::insert_whale_transaction(
+    let inserted = db::insert_whale_transaction(
         &mut *tx,
         Utc::now(),
         &p.id,
@@ -281,5 +354,27 @@ async fn ingest_whale_payment(
         amount,
     )
     .await?;
-    Ok(true)
+    if !inserted {
+        return Ok(None);
+    }
+
+    let severity = alerts::severity_for_whale_multiple(amount, threshold);
+    let message = match &p.to {
+        Some(dest) => format!("Whale payment: {amount} {asset_code} from {source} to {dest}"),
+        None => format!("Whale payment: {amount} {asset_code} from {source}"),
+    };
+    let details = json!({
+        "tx_hash": p.transaction_hash,
+        "asset_code": asset_code,
+        "asset_issuer": asset_issuer,
+        "amount": amount.to_string(),
+        "source_account": source,
+        "dest_account": p.to,
+    });
+    Ok(Some(PendingAlert {
+        kind: "whale_payment",
+        severity,
+        message,
+        details,
+    }))
 }

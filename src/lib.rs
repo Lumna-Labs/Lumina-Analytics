@@ -1,9 +1,12 @@
+pub mod alerts;
 pub mod api;
 pub mod cache;
 pub mod config;
 pub mod db;
 pub mod horizon;
 pub mod logic;
+pub mod metrics;
 pub mod models;
 pub mod pricing;
+pub mod ratelimit;
 pub mod soroban;

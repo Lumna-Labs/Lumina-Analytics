@@ -4,8 +4,8 @@ use sqlx::postgres::PgPoolOptions;
 use sqlx::PgPool;
 
 use crate::models::{
-    LendingPositionRow, LiquidationRiskBucket, PoolSnapshotRow, PoolTrendRaw, PoolWithLatest,
-    TokenSnapshotRow, TokenWithLatest, TvlPoint, TvlPointRaw, WhaleTransactionRow,
+    AlertRow, LendingPositionRow, LiquidationRiskBucket, PoolSnapshotRow, PoolTrendRaw,
+    PoolWithLatest, TokenSnapshotRow, TokenWithLatest, TvlPoint, TvlPointRaw, WhaleTransactionRow,
 };
 
 pub async fn connect(database_url: &str) -> anyhow::Result<PgPool> {
@@ -168,6 +168,10 @@ where
     Ok(())
 }
 
+/// Returns `true` if a new row was inserted, `false` if this payment
+/// (identified by `op_id`+`time`) had already been recorded — used by the
+/// caller to alert on genuinely new whale payments only, not on cursor
+/// replays.
 #[allow(clippy::too_many_arguments)]
 pub async fn insert_whale_transaction<'e, E>(
     executor: E,
@@ -179,11 +183,11 @@ pub async fn insert_whale_transaction<'e, E>(
     asset_code: &str,
     asset_issuer: Option<&str>,
     amount: Decimal,
-) -> anyhow::Result<()>
+) -> anyhow::Result<bool>
 where
     E: sqlx::PgExecutor<'e>,
 {
-    sqlx::query(
+    let result = sqlx::query(
         r#"
         INSERT INTO whale_transactions
             (time, op_id, tx_hash, source_account, dest_account, asset_code, asset_issuer, amount)
@@ -201,7 +205,7 @@ where
     .bind(amount)
     .execute(executor)
     .await?;
-    Ok(())
+    Ok(result.rows_affected() > 0)
 }
 
 pub async fn insert_asset_price<'e, E>(
@@ -233,7 +237,11 @@ where
 
 // ---- reads (used by the REST API) ----
 
-pub async fn list_pools_with_latest(pool: &PgPool) -> anyhow::Result<Vec<PoolWithLatest>> {
+pub async fn list_pools_with_latest(
+    pool: &PgPool,
+    limit: i64,
+    offset: i64,
+) -> anyhow::Result<Vec<PoolWithLatest>> {
     let rows = sqlx::query_as::<_, PoolWithLatest>(
         r#"
         SELECT
@@ -248,11 +256,21 @@ pub async fn list_pools_with_latest(pool: &PgPool) -> anyhow::Result<Vec<PoolWit
             LIMIT 1
         ) s ON true
         ORDER BY s.total_shares DESC NULLS LAST
+        LIMIT $1 OFFSET $2
         "#,
     )
+    .bind(limit)
+    .bind(offset)
     .fetch_all(pool)
     .await?;
     Ok(rows)
+}
+
+pub async fn count_pools(pool: &PgPool) -> anyhow::Result<i64> {
+    let (count,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM pools")
+        .fetch_one(pool)
+        .await?;
+    Ok(count)
 }
 
 pub async fn pool_history(
@@ -275,7 +293,11 @@ pub async fn pool_history(
     Ok(rows)
 }
 
-pub async fn list_tokens_with_latest(pool: &PgPool) -> anyhow::Result<Vec<TokenWithLatest>> {
+pub async fn list_tokens_with_latest(
+    pool: &PgPool,
+    limit: i64,
+    offset: i64,
+) -> anyhow::Result<Vec<TokenWithLatest>> {
     let rows = sqlx::query_as::<_, TokenWithLatest>(
         r#"
         SELECT
@@ -291,11 +313,21 @@ pub async fn list_tokens_with_latest(pool: &PgPool) -> anyhow::Result<Vec<TokenW
             LIMIT 1
         ) s ON true
         ORDER BY s.num_accounts DESC NULLS LAST
+        LIMIT $1 OFFSET $2
         "#,
     )
+    .bind(limit)
+    .bind(offset)
     .fetch_all(pool)
     .await?;
     Ok(rows)
+}
+
+pub async fn count_tokens(pool: &PgPool) -> anyhow::Result<i64> {
+    let (count,): (i64,) = sqlx::query_as("SELECT COUNT(*) FROM tokens")
+        .fetch_one(pool)
+        .await?;
+    Ok(count)
 }
 
 pub async fn token_history(
@@ -495,6 +527,45 @@ pub async fn pool_trends(pool: &PgPool, since: DateTime<Utc>) -> anyhow::Result<
         "#,
     )
     .bind(since)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows)
+}
+
+pub async fn insert_alert(
+    pool: &PgPool,
+    time: DateTime<Utc>,
+    kind: &str,
+    severity: &str,
+    message: &str,
+    details: &serde_json::Value,
+) -> anyhow::Result<()> {
+    sqlx::query(
+        r#"
+        INSERT INTO alerts (time, kind, severity, message, details)
+        VALUES ($1, $2, $3, $4, $5)
+        "#,
+    )
+    .bind(time)
+    .bind(kind)
+    .bind(severity)
+    .bind(message)
+    .bind(details)
+    .execute(pool)
+    .await?;
+    Ok(())
+}
+
+pub async fn list_alerts(pool: &PgPool, limit: i64) -> anyhow::Result<Vec<AlertRow>> {
+    let rows = sqlx::query_as::<_, AlertRow>(
+        r#"
+        SELECT time, kind, severity, message, details
+        FROM alerts
+        ORDER BY time DESC
+        LIMIT $1
+        "#,
+    )
+    .bind(limit)
     .fetch_all(pool)
     .await?;
     Ok(rows)

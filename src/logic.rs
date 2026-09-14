@@ -42,6 +42,40 @@ pub fn percent_change(before: Decimal, now: Decimal) -> Option<Decimal> {
     Some((now - before) / before * Decimal::from(100))
 }
 
+/// Derives `(ltv, health_factor)` for a lending position from its collateral
+/// and debt amounts plus a USD price for each asset, when both are known
+/// (see `Config::blend_asset_prices_usd`). `ltv` is debt/collateral as a
+/// percentage; `health_factor` here is a simplified collateral/debt
+/// coverage ratio — a real proxy for risk, but not Blend's own protocol
+/// formula, which additionally weights each reserve by its own
+/// collateral/liability factor (risk parameters this crate doesn't have a
+/// source for). Returns `(None, None)` when either asset's price is
+/// unknown, or when collateral is zero (LTV is undefined, not infinite/0).
+/// When debt is zero, `ltv` is `Some(0)` but `health_factor` is `None`
+/// (no debt to be at risk of, so a coverage ratio doesn't apply).
+pub fn compute_lending_risk(
+    collateral_amount: Decimal,
+    collateral_price_usd: Option<Decimal>,
+    debt_amount: Decimal,
+    debt_price_usd: Option<Decimal>,
+) -> (Option<Decimal>, Option<Decimal>) {
+    let (Some(collateral_price), Some(debt_price)) = (collateral_price_usd, debt_price_usd) else {
+        return (None, None);
+    };
+    let collateral_usd = collateral_amount * collateral_price;
+    let debt_usd = debt_amount * debt_price;
+    if collateral_usd.is_zero() {
+        return (None, None);
+    }
+    let ltv = (debt_usd / collateral_usd) * Decimal::from(100);
+    let health_factor = if debt_usd.is_zero() {
+        None
+    } else {
+        Some(collateral_usd / debt_usd)
+    };
+    (Some(ltv), health_factor)
+}
+
 /// Loan-to-value risk banding used by the liquidation dashboard. `ltv` is a
 /// percentage (0-100+, values above 100 are already technically insolvent).
 pub fn risk_level(ltv: Decimal) -> &'static str {
@@ -53,6 +87,17 @@ pub fn risk_level(ltv: Decimal) -> &'static str {
         "MEDIUM"
     } else {
         "LOW"
+    }
+}
+
+/// Total order over `risk_level`'s output, used to detect whether a
+/// position's risk band moved *up* (worth alerting on) vs. sideways/down.
+pub fn risk_rank(level: &str) -> u8 {
+    match level {
+        "CRITICAL" => 3,
+        "HIGH" => 2,
+        "MEDIUM" => 1,
+        _ => 0,
     }
 }
 
@@ -135,11 +180,53 @@ mod tests {
     }
 
     #[test]
+    fn lending_risk_none_when_either_price_unknown() {
+        assert_eq!(
+            compute_lending_risk(dec("100"), None, dec("50"), Some(dec("1"))),
+            (None, None)
+        );
+        assert_eq!(
+            compute_lending_risk(dec("100"), Some(dec("1")), dec("50"), None),
+            (None, None)
+        );
+    }
+
+    #[test]
+    fn lending_risk_computes_ltv_and_health_factor() {
+        // 100 collateral @ $1 = $100; 50 debt @ $1 = $50 => LTV 50%, HF 2.0.
+        let (ltv, hf) = compute_lending_risk(dec("100"), Some(dec("1")), dec("50"), Some(dec("1")));
+        assert_eq!(ltv, Some(dec("50")));
+        assert_eq!(hf, Some(dec("2")));
+    }
+
+    #[test]
+    fn lending_risk_zero_collateral_is_undefined() {
+        assert_eq!(
+            compute_lending_risk(dec("0"), Some(dec("1")), dec("50"), Some(dec("1"))),
+            (None, None)
+        );
+    }
+
+    #[test]
+    fn lending_risk_zero_debt_has_no_health_factor() {
+        let (ltv, hf) = compute_lending_risk(dec("100"), Some(dec("1")), dec("0"), Some(dec("1")));
+        assert_eq!(ltv, Some(dec("0")));
+        assert_eq!(hf, None);
+    }
+
+    #[test]
     fn risk_level_bands() {
         assert_eq!(risk_level(dec("96")), "CRITICAL");
         assert_eq!(risk_level(dec("95")), "CRITICAL");
         assert_eq!(risk_level(dec("90")), "HIGH");
         assert_eq!(risk_level(dec("75")), "MEDIUM");
         assert_eq!(risk_level(dec("50")), "LOW");
+    }
+
+    #[test]
+    fn risk_rank_orders_bands_low_to_critical() {
+        assert!(risk_rank("CRITICAL") > risk_rank("HIGH"));
+        assert!(risk_rank("HIGH") > risk_rank("MEDIUM"));
+        assert!(risk_rank("MEDIUM") > risk_rank("LOW"));
     }
 }

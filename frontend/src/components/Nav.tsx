@@ -1,4 +1,6 @@
 import { NavLink } from "react-router-dom";
+import { useThemeMode } from "../theme";
+import type { ThemeMode } from "../theme";
 
 const links = [
   { to: "/", label: "TVL Overview", end: true },
@@ -6,9 +8,18 @@ const links = [
   { to: "/tokens", label: "Token Analysis" },
   { to: "/whales", label: "Whale Tracker" },
   { to: "/liquidations", label: "Liquidations" },
+  { to: "/alerts", label: "Alerts" },
+];
+
+const MODES: { mode: ThemeMode; label: string }[] = [
+  { mode: "system", label: "Auto" },
+  { mode: "light", label: "Light" },
+  { mode: "dark", label: "Dark" },
 ];
 
 export function Nav() {
+  const { mode, setMode } = useThemeMode();
+
   return (
     <aside className="sidebar">
       <div className="brand">
@@ -27,6 +38,18 @@ export function Nav() {
           </NavLink>
         ))}
       </nav>
+      <div className="theme-toggle" role="group" aria-label="Theme">
+        {MODES.map((m) => (
+          <button
+            key={m.mode}
+            type="button"
+            className={mode === m.mode ? "active" : ""}
+            onClick={() => setMode(m.mode)}
+          >
+            {m.label}
+          </button>
+        ))}
+      </div>
     </aside>
   );
 }

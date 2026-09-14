@@ -15,8 +15,10 @@
   --series-1: #2a78d6;
 }
 
+/* System preference applies unless the user has explicitly picked "light"
+   via the in-app theme toggle (persisted as data-theme on <html>). */
 @media (prefers-color-scheme: dark) {
-  :root {
+  :root:not([data-theme="light"]) {
     color-scheme: dark;
     --surface: #1a1a19;
     --page: #0d0d0d;
@@ -28,6 +30,20 @@
     --border: rgba(255, 255, 255, 0.1);
     --series-1: #3987e5;
   }
+}
+
+/* Explicit "dark" choice wins regardless of system preference. */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --surface: #1a1a19;
+  --page: #0d0d0d;
+  --text-primary: #ffffff;
+  --text-secondary: #c3c2b7;
+  --muted: #898781;
+  --gridline: #2c2c2a;
+  --baseline: #383835;
+  --border: rgba(255, 255, 255, 0.1);
+  --series-1: #3987e5;
 }
 
 * {
@@ -344,6 +360,88 @@ select:focus {
   width: 9px;
   height: 9px;
   border-radius: 2px;
+}
+
+.theme-toggle {
+  display: flex;
+  gap: 2px;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  margin: 10px 10px 4px;
+}
+
+.theme-toggle button {
+  flex: 1;
+  border: none;
+  background: transparent;
+  color: var(--text-secondary);
+  font-size: 11px;
+  padding: 5px 0;
+  border-radius: 6px;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.theme-toggle button.active {
+  background: var(--series-1);
+  color: white;
+}
+
+.sortable-th {
+  cursor: pointer;
+  user-select: none;
+}
+
+.sortable-th:hover {
+  color: var(--text-primary);
+}
+
+.sort-arrow {
+  display: inline-block;
+  margin-left: 3px;
+  opacity: 0.7;
+}
+
+.badge {
+  display: inline-flex;
+  align-items: center;
+  padding: 2px 8px;
+  border-radius: 999px;
+  font-size: 11px;
+  font-weight: 700;
+  letter-spacing: 0.02em;
+}
+
+.badge-info {
+  background: rgba(42, 120, 214, 0.14);
+  color: var(--series-1);
+}
+
+.badge-warning {
+  background: rgba(250, 178, 25, 0.16);
+  color: var(--warning);
+}
+
+.badge-critical {
+  background: rgba(208, 59, 59, 0.14);
+  color: var(--critical);
+}
+
+.export-btn {
+  border: 1px solid var(--border);
+  background: var(--surface);
+  color: var(--text-secondary);
+  border-radius: 8px;
+  padding: 6px 12px;
+  font-size: 12.5px;
+  cursor: pointer;
+  font-family: inherit;
+}
+
+.export-btn:hover {
+  color: var(--text-primary);
+  border-color: var(--text-secondary);
 }
 
 @media (max-width: 780px) {

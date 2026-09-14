@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 
 interface AsyncState<T> {
   data: T | null;
@@ -39,4 +39,51 @@ export function usePolled<T>(fn: () => Promise<T>, deps: unknown[], pollMs = 60_
   }, deps);
 
   return state;
+}
+
+export type SortDir = "asc" | "desc";
+
+/**
+ * Client-side sorting for a table of rows. Numeric-looking values (including
+ * the string-encoded Decimal/NUMERIC fields the API returns) sort
+ * numerically; everything else falls back to locale string comparison.
+ * Clicking the same column again flips direction; a new column starts
+ * descending (most tables here want "biggest/newest first" by default).
+ */
+export function useSortableRows<T extends object>(
+  rows: T[],
+  initialKey: keyof T,
+  initialDir: SortDir = "desc",
+) {
+  const [sortKey, setSortKey] = useState<keyof T>(initialKey);
+  const [sortDir, setSortDir] = useState<SortDir>(initialDir);
+
+  const sorted = useMemo(() => {
+    const copy = [...rows];
+    copy.sort((a, b) => {
+      const av = a[sortKey];
+      const bv = b[sortKey];
+      const an = typeof av === "number" ? av : parseFloat(String(av));
+      const bn = typeof bv === "number" ? bv : parseFloat(String(bv));
+      let cmp: number;
+      if (!Number.isNaN(an) && !Number.isNaN(bn)) {
+        cmp = an - bn;
+      } else {
+        cmp = String(av ?? "").localeCompare(String(bv ?? ""));
+      }
+      return sortDir === "asc" ? cmp : -cmp;
+    });
+    return copy;
+  }, [rows, sortKey, sortDir]);
+
+  function toggleSort(key: keyof T) {
+    if (key === sortKey) {
+      setSortDir((d) => (d === "asc" ? "desc" : "asc"));
+    } else {
+      setSortKey(key);
+      setSortDir("desc");
+    }
+  }
+
+  return { sorted, sortKey, sortDir, toggleSort };
 }

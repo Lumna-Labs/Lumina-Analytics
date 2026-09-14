@@ -69,6 +69,8 @@ services:
       # Uncomment and set to real, verified Blend pool contract IDs to enable
       # liquidation-risk ingestion (see README for why this isn't guessed).
       # BLEND_POOL_IDS: ""
+      # BLEND_ASSET_PRICES_USD: ""
+      # ALERT_WEBHOOK_URL: ""
 
   frontend:
     build:

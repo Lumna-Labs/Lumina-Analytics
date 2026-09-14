@@ -1,9 +1,14 @@
 import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api";
-import { usePolled } from "../hooks";
+import type { TokenWithLatest } from "../api";
+import { usePolled, useSortableRows } from "../hooks";
 import { ErrorState, LoadingState } from "../components/States";
+import { SortableTh } from "../components/SortableTh";
+import { downloadCsv, toCsv } from "../csv";
 import { fmtCompact, fmtTime, truncateMiddle } from "../format";
+
+type SortKey = keyof TokenWithLatest;
 
 export function Tokens() {
   const navigate = useNavigate();
@@ -17,6 +22,23 @@ export function Tokens() {
       (t) => t.asset_code.toLowerCase().includes(q) || t.asset_issuer.toLowerCase().includes(q),
     );
   }, [tokens.data, query]);
+
+  const { sorted, sortKey, sortDir, toggleSort } = useSortableRows<TokenWithLatest>(
+    filtered,
+    "num_accounts",
+  );
+
+  function exportCsv() {
+    const csv = toCsv(sorted, [
+      "asset_code",
+      "asset_issuer",
+      "amount",
+      "num_accounts",
+      "num_claimable_balances",
+      "time",
+    ]);
+    downloadCsv("lumina-tokens.csv", csv);
+  }
 
   return (
     <div>
@@ -40,6 +62,9 @@ export function Tokens() {
         <span style={{ color: "var(--muted)", fontSize: 12.5 }}>
           {filtered.length} of {tokens.data?.length ?? 0} assets
         </span>
+        <button type="button" className="export-btn" onClick={exportCsv} disabled={sorted.length === 0}>
+          Export CSV
+        </button>
       </div>
 
       {tokens.loading && !tokens.data ? (
@@ -49,16 +74,16 @@ export function Tokens() {
           <table>
             <thead>
               <tr>
-                <th>Code</th>
-                <th>Issuer</th>
-                <th>Supply</th>
-                <th>Holders</th>
-                <th>Claimable Balances</th>
-                <th>Last Snapshot</th>
+                <SortableTh<SortKey> label="Code" column="asset_code" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                <SortableTh<SortKey> label="Issuer" column="asset_issuer" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                <SortableTh<SortKey> label="Supply" column="amount" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                <SortableTh<SortKey> label="Holders" column="num_accounts" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                <SortableTh<SortKey> label="Claimable Balances" column="num_claimable_balances" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                <SortableTh<SortKey> label="Last Snapshot" column="time" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
               </tr>
             </thead>
             <tbody>
-              {filtered.map((t) => (
+              {sorted.map((t) => (
                 <tr
                   key={`${t.asset_code}:${t.asset_issuer}`}
                   className="clickable"

@@ -1,5 +1,6 @@
 use axum::extract::{Path, Query, State};
 use axum::http::StatusCode;
+use axum::middleware::from_fn_with_state;
 use axum::response::{IntoResponse, Json};
 use axum::routing::get;
 use axum::Router;
@@ -10,15 +11,26 @@ use tower_http::cors::CorsLayer;
 use tower_http::trace::TraceLayer;
 
 use crate::db;
+use crate::metrics;
+use crate::ratelimit;
 
 use super::AppState;
+
+/// Default and maximum page size for list endpoints. A generous default
+/// keeps existing integrations (which don't pass `limit`) working
+/// unchanged for realistic dataset sizes; the max cap keeps one request
+/// from being able to force an unbounded table scan.
+const DEFAULT_PAGE_SIZE: i64 = 500;
+const MAX_PAGE_SIZE: i64 = 2000;
 
 pub fn router(state: AppState) -> Router {
     Router::new()
         .route("/health", get(health))
+        .route("/metrics", get(metrics::metrics_handler))
         .route("/tvl", get(tvl))
         .route("/pools", get(pools))
         .route("/pools/:pool_id/history", get(pool_history))
+        .route("/pools/trending", get(pools_trending))
         .route("/tokens", get(tokens))
         .route(
             "/tokens/:asset_code/:asset_issuer/history",
@@ -26,10 +38,30 @@ pub fn router(state: AppState) -> Router {
         )
         .route("/transactions/whales", get(whale_transactions))
         .route("/liquidations", get(liquidations))
-        .route("/pools/trending", get(pools_trending))
+        .route("/alerts", get(alerts))
+        .route_layer(from_fn_with_state(state.clone(), ratelimit::enforce))
+        .route_layer(from_fn_with_state(state.clone(), metrics::track))
         .layer(CorsLayer::permissive())
         .layer(TraceLayer::new_for_http())
         .with_state(state)
+}
+
+#[derive(Debug, Deserialize)]
+struct PageQuery {
+    limit: Option<i64>,
+    offset: Option<i64>,
+}
+
+impl PageQuery {
+    fn limit(&self) -> i64 {
+        self.limit
+            .unwrap_or(DEFAULT_PAGE_SIZE)
+            .clamp(1, MAX_PAGE_SIZE)
+    }
+
+    fn offset(&self) -> i64 {
+        self.offset.unwrap_or(0).max(0)
+    }
 }
 
 async fn health() -> impl IntoResponse {
@@ -55,10 +87,14 @@ async fn tvl(State(state): State<AppState>, Query(q): Query<RangeQuery>) -> impl
     }
 }
 
-async fn pools(State(state): State<AppState>) -> impl IntoResponse {
+async fn pools(State(state): State<AppState>, Query(q): Query<PageQuery>) -> impl IntoResponse {
+    let (limit, offset) = (q.limit(), q.offset());
+    let key = format!("pools:{limit}:{offset}");
     match state
         .cache
-        .get_or_compute("pools", || db::list_pools_with_latest(&state.db))
+        .get_or_compute(&key, || {
+            db::list_pools_with_latest(&state.db, limit, offset)
+        })
         .await
     {
         Ok(rows) => Json(rows).into_response(),
@@ -78,10 +114,14 @@ async fn pool_history(
     }
 }
 
-async fn tokens(State(state): State<AppState>) -> impl IntoResponse {
+async fn tokens(State(state): State<AppState>, Query(q): Query<PageQuery>) -> impl IntoResponse {
+    let (limit, offset) = (q.limit(), q.offset());
+    let key = format!("tokens:{limit}:{offset}");
     match state
         .cache
-        .get_or_compute("tokens", || db::list_tokens_with_latest(&state.db))
+        .get_or_compute(&key, || {
+            db::list_tokens_with_latest(&state.db, limit, offset)
+        })
         .await
     {
         Ok(rows) => Json(rows).into_response(),
@@ -185,6 +225,19 @@ async fn pools_trending(
 
     match state.cache.get_or_compute(&key, compute).await {
         Ok(trends) => Json(trends).into_response(),
+        Err(e) => err(e),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct AlertsQuery {
+    limit: Option<i64>,
+}
+
+async fn alerts(State(state): State<AppState>, Query(q): Query<AlertsQuery>) -> impl IntoResponse {
+    let limit = q.limit.unwrap_or(100).clamp(1, 1000);
+    match db::list_alerts(&state.db, limit).await {
+        Ok(rows) => Json(rows).into_response(),
         Err(e) => err(e),
     }
 }

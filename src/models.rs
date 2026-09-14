@@ -120,6 +120,15 @@ pub struct PoolTrendRaw {
     pub reserve_b_now: Decimal,
 }
 
+#[derive(Debug, Serialize, sqlx::FromRow)]
+pub struct AlertRow {
+    pub time: DateTime<Utc>,
+    pub kind: String,
+    pub severity: String,
+    pub message: String,
+    pub details: serde_json::Value,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct PoolTrend {
     pub pool_id: String,

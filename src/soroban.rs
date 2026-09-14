@@ -21,6 +21,7 @@
 //! not a rounding error: this module reports genuine on-chain borrow/supply
 //! activity without inventing a risk score it can't back up.
 
+use std::collections::HashMap;
 use std::time::Duration;
 
 use chrono::{DateTime, Utc};
@@ -30,8 +31,10 @@ use serde_json::json;
 use sqlx::PgPool;
 use stellar_xdr::{Limits, ReadXdr, ScAddress, ScVal};
 
+use crate::alerts;
 use crate::config::Config;
 use crate::db;
+use crate::logic;
 
 /// Soroban token amounts on Stellar use 7 decimal places, matching the
 /// classic network's stroop precision — true for every asset routed through
@@ -209,10 +212,12 @@ impl SorobanClient {
 /// a bad cycle here must never take down payment/pool ingestion.
 pub async fn ingest_lending_cycle(
     pool: &PgPool,
+    http: &reqwest::Client,
     config: &Config,
     contract_ids: &[String],
 ) -> anyhow::Result<()> {
     let client = SorobanClient::new(config.soroban_rpc_url.clone());
+    let prices = config.blend_asset_prices_usd();
 
     let cursor = db::get_ingest_cursor(pool, EVENTS_CURSOR_KEY).await?;
     let start_ledger = match &cursor {
@@ -240,7 +245,7 @@ pub async fn ingest_lending_cycle(
 
     let mut processed = 0;
     for event in &events {
-        match process_event(pool, event).await {
+        match process_event(pool, http, config, &prices, event).await {
             Ok(true) => processed += 1,
             Ok(false) => {}
             Err(e) => tracing::debug!("skipping unparseable Blend event {}: {e:?}", event.id),
@@ -282,7 +287,13 @@ fn classify(event_name: &str) -> Option<PositionEvent> {
 /// Returns `Ok(true)` if a position was written, `Ok(false)` if the event
 /// was recognized-but-skippable (e.g. wrong kind), and `Err` if decoding
 /// failed outright.
-async fn process_event(pool: &PgPool, event: &RpcEvent) -> anyhow::Result<bool> {
+async fn process_event(
+    pool: &PgPool,
+    http: &reqwest::Client,
+    config: &Config,
+    prices: &HashMap<String, Decimal>,
+    event: &RpcEvent,
+) -> anyhow::Result<bool> {
     let topics: Vec<ScVal> = event
         .topic
         .iter()
@@ -327,6 +338,7 @@ async fn process_event(pool: &PgPool, event: &RpcEvent) -> anyhow::Result<bool> 
         .map_err(|e| anyhow::anyhow!("bad ledgerClosedAt: {e:?}"))?;
 
     let latest = db::latest_lending_position(pool, "blend", &event.contract_id, &account).await?;
+    let previous_risk_level = latest.as_ref().and_then(|l| l.ltv).map(logic::risk_level);
     let mut collateral_asset = latest
         .as_ref()
         .map(|l| l.collateral_asset.clone())
@@ -357,6 +369,13 @@ async fn process_event(pool: &PgPool, event: &RpcEvent) -> anyhow::Result<bool> 
         }
     }
 
+    let (ltv, health_factor) = logic::compute_lending_risk(
+        collateral_amount,
+        prices.get(&collateral_asset).copied(),
+        debt_amount,
+        prices.get(&debt_asset).copied(),
+    );
+
     db::insert_lending_position(
         pool,
         time,
@@ -367,11 +386,57 @@ async fn process_event(pool: &PgPool, event: &RpcEvent) -> anyhow::Result<bool> 
         collateral_amount,
         &debt_asset,
         debt_amount,
-        None,
-        None,
+        ltv,
+        health_factor,
     )
     .await?;
+
+    if let Some(ltv_value) = ltv {
+        let new_level = logic::risk_level(ltv_value);
+        let escalated = matches!(new_level, "HIGH" | "CRITICAL")
+            && previous_risk_level
+                .is_none_or(|prev| logic::risk_rank(new_level) > logic::risk_rank(prev));
+        if escalated {
+            let severity = alerts::severity_for_risk_level(new_level);
+            let message = format!(
+                "Blend position {} in pool {} crossed into {} risk (LTV {:.1}%)",
+                short(&account),
+                short(&event.contract_id),
+                new_level,
+                ltv_value,
+            );
+            let details = json!({
+                "account": account,
+                "pool_contract": event.contract_id,
+                "ltv": ltv_value.to_string(),
+                "health_factor": health_factor.map(|h| h.to_string()),
+                "risk_level": new_level,
+            });
+            if let Err(e) = alerts::record(
+                pool,
+                http,
+                config,
+                "liquidation_risk",
+                severity,
+                message,
+                details,
+            )
+            .await
+            {
+                tracing::warn!("failed to record liquidation-risk alert: {e:?}");
+            }
+        }
+    }
+
     Ok(true)
+}
+
+fn short(s: &str) -> String {
+    if s.len() <= 12 {
+        s.to_string()
+    } else {
+        format!("{}…{}", &s[..6], &s[s.len() - 4..])
+    }
 }
 
 fn sc_val_symbol(val: &ScVal) -> Option<String> {

@@ -95,6 +95,14 @@ export interface TokenSnapshotRow {
   num_claimable_balances: number;
 }
 
+export interface AlertRow {
+  time: string;
+  kind: string;
+  severity: "INFO" | "WARNING" | "CRITICAL";
+  message: string;
+  details: Record<string, unknown>;
+}
+
 export interface PoolTrend {
   pool_id: string;
   asset_a: string;
@@ -111,11 +119,13 @@ export interface PoolTrend {
 
 export const api = {
   tvl: (hours = 24) => get<TvlPoint[]>(`/tvl?hours=${hours}`),
-  pools: () => get<PoolWithLatest[]>("/pools"),
+  pools: (limit = 2000, offset = 0) =>
+    get<PoolWithLatest[]>(`/pools?limit=${limit}&offset=${offset}`),
   poolHistory: (poolId: string, hours = 24) =>
     get<PoolSnapshotRow[]>(`/pools/${poolId}/history?hours=${hours}`),
   poolsTrending: (hours = 24) => get<PoolTrend[]>(`/pools/trending?hours=${hours}`),
-  tokens: () => get<TokenWithLatest[]>("/tokens"),
+  tokens: (limit = 2000, offset = 0) =>
+    get<TokenWithLatest[]>(`/tokens?limit=${limit}&offset=${offset}`),
   tokenHistory: (assetCode: string, assetIssuer: string, hours = 24) =>
     get<TokenSnapshotRow[]>(
       `/tokens/${encodeURIComponent(assetCode)}/${encodeURIComponent(assetIssuer)}/history?hours=${hours}`,
@@ -123,4 +133,5 @@ export const api = {
   whaleTransactions: (minAmount = 10_000, limit = 100) =>
     get<WhaleTransactionRow[]>(`/transactions/whales?min_amount=${minAmount}&limit=${limit}`),
   liquidations: () => get<LiquidationsResponse>("/liquidations"),
+  alerts: (limit = 100) => get<AlertRow[]>(`/alerts?limit=${limit}`),
 };

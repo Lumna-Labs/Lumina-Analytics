@@ -1,4 +1,8 @@
+use std::collections::HashMap;
 use std::env;
+use std::str::FromStr;
+
+use rust_decimal::Decimal;
 
 #[derive(Clone, Debug)]
 pub struct Config {
@@ -33,6 +37,37 @@ pub struct Config {
     /// contracts. Populate with real, verified pool contract IDs for the
     /// network you're pointed at to turn on liquidation-risk ingestion.
     pub blend_pool_ids_raw: String,
+    /// Optional, comma-separated `contract_address:usd_price` pairs, operator-
+    /// supplied. Blend identifies reserve assets by Soroban Asset Contract
+    /// address, not the code/issuer pairs Horizon and CoinGecko use, so
+    /// there's no automatic way to price them the way classic-network assets
+    /// are priced. Left empty, `ltv`/`health_factor` stay `NULL` (an honest
+    /// gap); populate it with real prices for your pool's reserves (from
+    /// whatever oracle or spot source you trust) to turn on risk banding.
+    /// This is a coarse, static override — not a live feed — by design: a
+    /// wrong or spoofed price here would fabricate risk numbers, so this
+    /// crate never fetches one automatically on your behalf.
+    pub blend_asset_prices_usd_raw: String,
+    /// Optional webhook URL (Slack-compatible incoming-webhook JSON: a POST
+    /// body of `{"text": "..."}`) that gets notified for alert-worthy events
+    /// (outsized whale payments, lending positions crossing into a higher
+    /// risk band). Alerts are always recorded to the `alerts` table
+    /// regardless of this setting; the webhook is an optional extra delivery
+    /// channel, off by default so this crate never talks to a third-party
+    /// endpoint without the operator opting in.
+    pub alert_webhook_url: Option<String>,
+    /// Minimum severity ("INFO", "WARNING", "CRITICAL") that triggers a
+    /// webhook notification; every severity is still recorded to `alerts`.
+    pub alert_min_severity: String,
+    /// Requests allowed per second per client IP on the API, using a simple
+    /// token-bucket. `0` disables rate limiting entirely (the default) —
+    /// this is a defensive measure for a publicly exposed deployment, not a
+    /// correctness requirement, so it fails open rather than risk blocking
+    /// legitimate traffic in local/dev use.
+    pub rate_limit_rps: u32,
+    /// Burst capacity for the same token-bucket (max requests in a short
+    /// spike before the per-second rate applies).
+    pub rate_limit_burst: u32,
 }
 
 impl Config {
@@ -67,6 +102,18 @@ impl Config {
             soroban_rpc_url: env::var("SOROBAN_RPC_URL")
                 .unwrap_or_else(|_| "https://mainnet.sorobanrpc.com".into()),
             blend_pool_ids_raw: env::var("BLEND_POOL_IDS").unwrap_or_default(),
+            blend_asset_prices_usd_raw: env::var("BLEND_ASSET_PRICES_USD").unwrap_or_default(),
+            alert_webhook_url: env::var("ALERT_WEBHOOK_URL").ok().filter(|s| !s.is_empty()),
+            alert_min_severity: env::var("ALERT_MIN_SEVERITY")
+                .unwrap_or_else(|_| "WARNING".to_string()),
+            rate_limit_rps: env::var("RATE_LIMIT_RPS")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(0),
+            rate_limit_burst: env::var("RATE_LIMIT_BURST")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(40),
         }
     }
 
@@ -77,5 +124,95 @@ impl Config {
             .filter(|s| !s.is_empty())
             .map(str::to_string)
             .collect()
+    }
+
+    /// Parses `BLEND_ASSET_PRICES_USD` into a contract-address -> USD-price
+    /// map. Malformed entries (bad decimal, missing `:`) are logged and
+    /// skipped rather than failing startup over one typo.
+    pub fn blend_asset_prices_usd(&self) -> HashMap<String, Decimal> {
+        let mut out = HashMap::new();
+        for entry in self.blend_asset_prices_usd_raw.split(',') {
+            let entry = entry.trim();
+            if entry.is_empty() {
+                continue;
+            }
+            let Some((addr, price)) = entry.split_once(':') else {
+                tracing::warn!("ignoring malformed BLEND_ASSET_PRICES_USD entry: {entry}");
+                continue;
+            };
+            match Decimal::from_str(price.trim()) {
+                Ok(price) => {
+                    out.insert(addr.trim().to_string(), price);
+                }
+                Err(e) => {
+                    tracing::warn!("ignoring malformed BLEND_ASSET_PRICES_USD entry {entry}: {e}")
+                }
+            }
+        }
+        out
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn parses_valid_blend_asset_prices() {
+        let config = Config {
+            blend_asset_prices_usd_raw: "CABC:1.00, CDEF:0.5001".to_string(),
+            ..test_config()
+        };
+        let prices = config.blend_asset_prices_usd();
+        assert_eq!(
+            prices.get("CABC"),
+            Some(&Decimal::from_str("1.00").unwrap())
+        );
+        assert_eq!(
+            prices.get("CDEF"),
+            Some(&Decimal::from_str("0.5001").unwrap())
+        );
+        assert_eq!(prices.len(), 2);
+    }
+
+    #[test]
+    fn skips_malformed_blend_asset_price_entries() {
+        let config = Config {
+            blend_asset_prices_usd_raw: "CABC:1.00,not-a-pair,CDEF:oops,,".to_string(),
+            ..test_config()
+        };
+        let prices = config.blend_asset_prices_usd();
+        assert_eq!(prices.len(), 1);
+        assert_eq!(
+            prices.get("CABC"),
+            Some(&Decimal::from_str("1.00").unwrap())
+        );
+    }
+
+    #[test]
+    fn empty_blend_asset_prices_is_empty_map() {
+        let config = test_config();
+        assert!(config.blend_asset_prices_usd().is_empty());
+    }
+
+    fn test_config() -> Config {
+        Config {
+            database_url: String::new(),
+            horizon_url: String::new(),
+            api_bind: String::new(),
+            poll_interval_secs: 60,
+            whale_threshold: 0.0,
+            redis_url: None,
+            cache_ttl_secs: 15,
+            price_feed_enabled: false,
+            coingecko_api_url: String::new(),
+            soroban_rpc_url: String::new(),
+            blend_pool_ids_raw: String::new(),
+            blend_asset_prices_usd_raw: String::new(),
+            alert_webhook_url: None,
+            alert_min_severity: "WARNING".to_string(),
+            rate_limit_rps: 0,
+            rate_limit_burst: 40,
+        }
     }
 }

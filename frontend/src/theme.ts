@@ -1,4 +1,5 @@
-import { useEffect, useState } from "react";
+import { createContext, createElement, useContext, useEffect, useState } from "react";
+import type { ReactNode } from "react";
 
 export interface ChartTheme {
   surface: string;
@@ -38,21 +39,73 @@ export const palette: { light: ChartTheme; dark: ChartTheme } = {
   },
 } as const;
 
-export function useIsDark(): boolean {
-  const [isDark, setIsDark] = useState(
+export type ThemeMode = "system" | "light" | "dark";
+const STORAGE_KEY = "lumina-theme";
+
+function readStoredMode(): ThemeMode {
+  try {
+    const v = localStorage.getItem(STORAGE_KEY);
+    if (v === "light" || v === "dark" || v === "system") return v;
+  } catch {
+    // localStorage unavailable (private browsing, blocked storage) — fall back to system.
+  }
+  return "system";
+}
+
+function useSystemDark(): boolean {
+  const [dark, setDark] = useState(
     () => window.matchMedia?.("(prefers-color-scheme: dark)").matches ?? false,
   );
   useEffect(() => {
     const mq = window.matchMedia("(prefers-color-scheme: dark)");
-    const listener = (e: MediaQueryListEvent) => setIsDark(e.matches);
+    const listener = (e: MediaQueryListEvent) => setDark(e.matches);
     mq.addEventListener("change", listener);
     return () => mq.removeEventListener("change", listener);
   }, []);
-  return isDark;
+  return dark;
 }
 
-export function useChartTheme() {
-  const isDark = useIsDark();
+interface ThemeContextValue {
+  mode: ThemeMode;
+  setMode: (mode: ThemeMode) => void;
+  isDark: boolean;
+}
+
+const ThemeContext = createContext<ThemeContextValue | null>(null);
+
+export function ThemeProvider({ children }: { children: ReactNode }) {
+  const [mode, setModeState] = useState<ThemeMode>(readStoredMode);
+  const systemDark = useSystemDark();
+  const isDark = mode === "dark" || (mode === "system" && systemDark);
+
+  useEffect(() => {
+    if (mode === "system") {
+      document.documentElement.removeAttribute("data-theme");
+    } else {
+      document.documentElement.setAttribute("data-theme", mode);
+    }
+  }, [mode]);
+
+  function setMode(next: ThemeMode) {
+    setModeState(next);
+    try {
+      localStorage.setItem(STORAGE_KEY, next);
+    } catch {
+      // ignore — theme just won't persist across reloads in this browser.
+    }
+  }
+
+  return createElement(ThemeContext.Provider, { value: { mode, setMode, isDark } }, children);
+}
+
+export function useThemeMode(): ThemeContextValue {
+  const ctx = useContext(ThemeContext);
+  if (!ctx) throw new Error("useThemeMode must be used within a ThemeProvider");
+  return ctx;
+}
+
+export function useChartTheme(): ChartTheme {
+  const { isDark } = useThemeMode();
   return isDark ? palette.dark : palette.light;
 }
 

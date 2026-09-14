@@ -1,12 +1,35 @@
 import { useState } from "react";
 import { api } from "../api";
-import { usePolled } from "../hooks";
+import type { WhaleTransactionRow } from "../api";
+import { usePolled, useSortableRows } from "../hooks";
 import { ErrorState, LoadingState } from "../components/States";
+import { SortableTh } from "../components/SortableTh";
+import { downloadCsv, toCsv } from "../csv";
 import { fmtCompact, fmtRelative, fmtTime, fmtUsd, truncateMiddle } from "../format";
+
+type SortKey = keyof WhaleTransactionRow;
 
 export function Whales() {
   const [minAmount, setMinAmount] = useState(10_000);
   const whales = usePolled(() => api.whaleTransactions(minAmount, 200), [minAmount], 20_000);
+  const { sorted, sortKey, sortDir, toggleSort } = useSortableRows<WhaleTransactionRow>(
+    whales.data ?? [],
+    "time",
+  );
+
+  function exportCsv() {
+    const csv = toCsv(sorted, [
+      "time",
+      "asset_code",
+      "asset_issuer",
+      "amount",
+      "amount_usd",
+      "source_account",
+      "dest_account",
+      "tx_hash",
+    ]);
+    downloadCsv("lumina-whale-payments.csv", csv);
+  }
 
   return (
     <div>
@@ -37,6 +60,9 @@ export function Whales() {
         <span style={{ color: "var(--muted)", fontSize: 12.5 }}>
           {whales.data ? `${whales.data.length} matching payments` : ""}
         </span>
+        <button type="button" className="export-btn" onClick={exportCsv} disabled={sorted.length === 0}>
+          Export CSV
+        </button>
       </div>
 
       {whales.loading && !whales.data ? (
@@ -46,17 +72,17 @@ export function Whales() {
           <table>
             <thead>
               <tr>
-                <th>Time</th>
-                <th>Asset</th>
-                <th>Amount</th>
-                <th>USD est.</th>
-                <th>From</th>
-                <th>To</th>
+                <SortableTh<SortKey> label="Time" column="time" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                <SortableTh<SortKey> label="Asset" column="asset_code" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                <SortableTh<SortKey> label="Amount" column="amount" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                <SortableTh<SortKey> label="USD est." column="amount_usd" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                <SortableTh<SortKey> label="From" column="source_account" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
+                <SortableTh<SortKey> label="To" column="dest_account" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
                 <th>Tx</th>
               </tr>
             </thead>
             <tbody>
-              {(whales.data ?? []).map((w) => (
+              {sorted.map((w) => (
                 <tr key={w.tx_hash + w.time}>
                   <td title={fmtTime(w.time)}>{fmtRelative(w.time)}</td>
                   <td>{w.asset_code}</td>
