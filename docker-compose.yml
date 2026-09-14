@@ -49,6 +49,12 @@ services:
       API_BIND: 0.0.0.0:8080
     ports:
       - "8080:8080"
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
 
   ingest:
     build:
@@ -57,6 +63,11 @@ services:
     container_name: lumina-ingest
     restart: unless-stopped
     command: ["lumina-ingest"]
+    # No healthcheck here: lumina-ingest has no HTTP server to probe (it's a
+    # polling loop, not a service), so there's nothing meaningful for Docker
+    # to `CMD` against — `restart: unless-stopped` plus its own internal
+    # per-cycle error handling (see src/bin/ingest.rs) is what keeps it
+    # running through a bad cycle.
     depends_on:
       timescaledb:
         condition: service_healthy
@@ -81,7 +92,8 @@ services:
     container_name: lumina-frontend
     restart: unless-stopped
     depends_on:
-      - api
+      api:
+        condition: service_healthy
     ports:
       - "5173:80"
 

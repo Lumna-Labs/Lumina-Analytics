@@ -91,8 +91,22 @@ impl PageQuery {
     }
 }
 
-async fn health() -> impl IntoResponse {
-    Json(serde_json::json!({ "status": "ok" }))
+/// A real readiness check, not a static 200: pings Postgres, since this API
+/// has no purpose without it. Redis is deliberately not checked here — it's
+/// documented as optional/fail-open (see `Cache`), so its absence shouldn't
+/// make an orchestrator think the API is unhealthy.
+async fn health(State(state): State<AppState>) -> impl IntoResponse {
+    match db::ping(&state.db).await {
+        Ok(()) => Json(serde_json::json!({ "status": "ok" })).into_response(),
+        Err(e) => {
+            tracing::error!("health check failed: {e:?}");
+            (
+                StatusCode::SERVICE_UNAVAILABLE,
+                Json(serde_json::json!({ "status": "error" })),
+            )
+                .into_response()
+        }
+    }
 }
 
 #[derive(Debug, Deserialize)]
@@ -172,6 +186,9 @@ async fn token_history(
 struct WhaleQuery {
     min_amount: Option<f64>,
     limit: Option<i64>,
+    /// Restricts to payments where this account was the source or
+    /// destination — powers the per-account Activity page.
+    account: Option<String>,
 }
 
 async fn whale_transactions(
@@ -180,7 +197,7 @@ async fn whale_transactions(
 ) -> impl IntoResponse {
     let min_amount = Decimal::try_from(q.min_amount.unwrap_or(10_000.0)).unwrap_or_default();
     let limit = q.limit.unwrap_or(100).clamp(1, 1000);
-    match db::list_whale_transactions(&state.db, min_amount, limit).await {
+    match db::list_whale_transactions(&state.db, min_amount, limit, q.account.as_deref()).await {
         Ok(rows) => Json(rows).into_response(),
         Err(e) => err(e),
     }

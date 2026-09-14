@@ -1,4 +1,5 @@
 import { useState } from "react";
+import { Link } from "react-router-dom";
 import { api } from "../api";
 import type { WhaleTransactionRow } from "../api";
 import { usePolled, useSortableRows, useLiveEvents } from "../hooks";
@@ -92,8 +93,16 @@ export function Whales() {
                   <td>{w.asset_code}</td>
                   <td>{fmtCompact(w.amount)}</td>
                   <td>{fmtUsd(w.amount_usd) ?? "—"}</td>
-                  <td className="mono">{truncateMiddle(w.source_account)}</td>
-                  <td className="mono">{w.dest_account ? truncateMiddle(w.dest_account) : "—"}</td>
+                  <td className="mono">
+                    <Link to={`/accounts/${w.source_account}`}>{truncateMiddle(w.source_account)}</Link>
+                  </td>
+                  <td className="mono">
+                    {w.dest_account ? (
+                      <Link to={`/accounts/${w.dest_account}`}>{truncateMiddle(w.dest_account)}</Link>
+                    ) : (
+                      "—"
+                    )}
+                  </td>
                   <td className="mono">{truncateMiddle(w.tx_hash, 5, 5)}</td>
                 </tr>
               ))}

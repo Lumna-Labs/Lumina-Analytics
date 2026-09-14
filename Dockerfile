@@ -12,7 +12,8 @@ COPY migrations ./migrations
 RUN cargo build --release --bins
 
 FROM debian:bookworm-slim AS runtime
-RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates \
+# curl backs docker-compose's healthcheck on the api service (GET /health).
+RUN apt-get update && apt-get install -y --no-install-recommends ca-certificates curl \
     && rm -rf /var/lib/apt/lists/*
 WORKDIR /app
 

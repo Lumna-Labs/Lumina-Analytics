@@ -120,14 +120,14 @@ loss.
 
 | Endpoint | Description |
 |---|---|
-| `GET /health` | Liveness check |
+| `GET /health` | Readiness check: pings Postgres and returns 503 if unreachable (Redis is optional/fail-open, so it isn't checked here) |
 | `GET /tvl?hours=24` | Hourly native-XLM reserve totals across pools, plus USD when priced |
 | `GET /pools` | All tracked pools with their latest snapshot |
 | `GET /pools/:pool_id/history?hours=24` | One pool's snapshot history |
 | `GET /pools/trending?hours=24` | Pools ranked by `total_shares` growth over the window |
 | `GET /tokens` | All tracked issued assets with their latest snapshot |
 | `GET /tokens/:asset_code/:asset_issuer/history?hours=24` | One asset's snapshot history |
-| `GET /transactions/whales?min_amount=10000&limit=100` | Large payments, enriched with a USD estimate where known |
+| `GET /transactions/whales?min_amount=10000&limit=100&account=G...` | Large payments, enriched with a USD estimate where known; `account` restricts to payments where that address was the source or destination (powers the per-account Activity page) |
 | `GET /liquidations` | Blend lending positions + risk-bucket summary (empty until `BLEND_POOL_IDS` is configured; `ltv`/`health_factor` stay `null` until `BLEND_ASSET_PRICES_USD` is too). Risk buckets honor any enabled `ltv_band` alert rules (see below), falling back to 70/85/95% LTV. |
 | `GET /alerts?limit=100` | Recently detected alert-worthy events (outsized whale payments, lending positions crossing into a higher risk band) |
 | `GET /alert-channels` / `POST /alert-channels` / `DELETE /alert-channels/:id` | Manage named Slack/Discord/generic-webhook alert delivery channels (see "Alert rules & channels") |
@@ -202,6 +202,14 @@ available live.
   indefinitely) have a 180-day TimescaleDB retention policy by default (see
   `migrations/0006_retention_policies.sql` for how to change or remove it). Event-driven tables
   (`whale_transactions`, `lending_positions`, `alerts`) aren't pruned automatically.
+- **Docker healthchecks**: the `api` service's compose healthcheck polls `GET /health`, so
+  `frontend` (and anything else that `depends_on: api: condition: service_healthy`) waits for a
+  real DB-backed readiness signal, not just "the container started". `ingest` has no HTTP server to
+  probe, so it relies on `restart: unless-stopped` plus its own per-cycle error handling instead.
+- **Frontend error boundary**: a render-time crash in one page (e.g. an unexpected API response
+  shape) shows an inline "Something went wrong" panel instead of blanking the whole app; navigating
+  away clears it. Data-fetch errors already have their own inline handling independent of this
+  (see `usePolled`'s `error` state).
 
 ## Known limitations (by design, not oversight)
 

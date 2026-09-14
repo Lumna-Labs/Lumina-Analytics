@@ -170,8 +170,16 @@ export function Overview() {
                 <td>{fmtTime(w.time)}</td>
                 <td>{w.asset_code}</td>
                 <td>{fmtCompact(w.amount)}</td>
-                <td className="mono">{truncateMiddle(w.source_account)}</td>
-                <td className="mono">{w.dest_account ? truncateMiddle(w.dest_account) : "—"}</td>
+                <td className="mono">
+                  <Link to={`/accounts/${w.source_account}`}>{truncateMiddle(w.source_account)}</Link>
+                </td>
+                <td className="mono">
+                  {w.dest_account ? (
+                    <Link to={`/accounts/${w.dest_account}`}>{truncateMiddle(w.dest_account)}</Link>
+                  ) : (
+                    "—"
+                  )}
+                </td>
               </tr>
             ))}
           </tbody>

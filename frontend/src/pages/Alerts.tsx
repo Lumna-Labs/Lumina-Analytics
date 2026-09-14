@@ -4,6 +4,7 @@ import { api } from "../api";
 import type { AlertRow } from "../api";
 import { usePolled, useLiveEvents } from "../hooks";
 import { EmptyState, ErrorState, LoadingState } from "../components/States";
+import { downloadCsv, toCsv } from "../csv";
 import { fmtRelative, fmtTime } from "../format";
 
 const SEVERITIES = ["CRITICAL", "WARNING", "INFO"] as const;
@@ -26,6 +27,11 @@ export function Alerts() {
     return severity === "ALL" ? rows : rows.filter((a) => a.severity === severity);
   }, [alerts.data, severity]);
 
+  function exportCsv() {
+    const csv = toCsv(filtered, ["time", "severity", "kind", "message"]);
+    downloadCsv("lumina-alerts.csv", csv);
+  }
+
   return (
     <div>
       <div className="page-header">
@@ -35,12 +41,6 @@ export function Alerts() {
           band, detected each ingest cycle. Always recorded here regardless of whether
           ALERT_WEBHOOK_URL is configured. Refreshes every 20s, plus instantly on a live event.
         </p>
-      </div>
-
-      <div className="toolbar">
-        <Link to="/alerts/settings" className="export-btn">
-          Manage rules &amp; channels
-        </Link>
       </div>
 
       {alerts.error && <ErrorState message={alerts.error} />}
@@ -57,6 +57,12 @@ export function Alerts() {
         <span style={{ color: "var(--muted)", fontSize: 12.5 }}>
           {filtered.length} of {alerts.data?.length ?? 0} alerts
         </span>
+        <button type="button" className="export-btn" onClick={exportCsv} disabled={filtered.length === 0}>
+          Export CSV
+        </button>
+        <Link to="/alerts/settings" className="export-btn">
+          Manage rules &amp; channels
+        </Link>
       </div>
 
       {alerts.loading && !alerts.data ? (

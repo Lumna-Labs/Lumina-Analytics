@@ -2,6 +2,7 @@ import { api } from "../api";
 import { usePolled, useWatchlist } from "../hooks";
 import { EmptyState, ErrorState, LoadingState } from "../components/States";
 import { PinButton } from "../components/PinButton";
+import { downloadCsv, toCsv } from "../csv";
 import { riskColor, useChartTheme } from "../theme";
 import { fmtCompact, truncateMiddle } from "../format";
 
@@ -12,6 +13,21 @@ export function Liquidations() {
 
   const summary = liquidations.data?.summary ?? [];
   const positions = liquidations.data?.positions ?? [];
+
+  function exportCsv() {
+    const csv = toCsv(positions, [
+      "protocol",
+      "pool_contract",
+      "account",
+      "collateral_asset",
+      "collateral_amount",
+      "debt_asset",
+      "debt_amount",
+      "ltv",
+      "health_factor",
+    ]);
+    downloadCsv("lumina-liquidations.csv", csv);
+  }
 
   return (
     <div>
@@ -53,8 +69,21 @@ export function Liquidations() {
             </div>
           )}
 
-          <h2 className="section-title">Positions</h2>
-          <div className="table-wrap">
+          <div className="toolbar" style={{ marginTop: 28, marginBottom: -4 }}>
+            <h2 className="section-title" style={{ margin: 0 }}>
+              Positions
+            </h2>
+            <button
+              type="button"
+              className="export-btn"
+              onClick={exportCsv}
+              disabled={positions.length === 0}
+              style={{ marginLeft: "auto" }}
+            >
+              Export CSV
+            </button>
+          </div>
+          <div className="table-wrap" style={{ marginTop: 10 }}>
             <table>
               <thead>
                 <tr>

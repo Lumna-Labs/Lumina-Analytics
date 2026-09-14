@@ -17,6 +17,15 @@ pub async fn connect(database_url: &str) -> anyhow::Result<PgPool> {
     Ok(pool)
 }
 
+/// Cheap connectivity check backing `/health`: a real round-trip query, not
+/// just "is the pool object alive" (a pool can hold stale/broken connections
+/// while still existing) — this API has no purpose without Postgres, so its
+/// health check should say so honestly.
+pub async fn ping(pool: &PgPool) -> anyhow::Result<()> {
+    sqlx::query("SELECT 1").execute(pool).await?;
+    Ok(())
+}
+
 pub async fn migrate(pool: &PgPool) -> anyhow::Result<()> {
     sqlx::migrate!("./migrations").run(pool).await?;
     Ok(())
@@ -353,10 +362,15 @@ pub async fn token_history(
     Ok(rows)
 }
 
+/// Lists whale payments at or above `min_amount`, most recent first,
+/// optionally restricted to those where `account` was the source or
+/// destination — powers both the Whale Tracker page (`account: None`) and
+/// the per-account Activity page (see `/accounts/:address`).
 pub async fn list_whale_transactions(
     pool: &PgPool,
     min_amount: Decimal,
     limit: i64,
+    account: Option<&str>,
 ) -> anyhow::Result<Vec<WhaleTransactionRow>> {
     let rows = sqlx::query_as::<_, WhaleTransactionRow>(
         r#"
@@ -375,12 +389,14 @@ pub async fn list_whale_transactions(
             LIMIT 1
         ) ap ON true
         WHERE wt.amount >= $1
+          AND ($3::text IS NULL OR wt.source_account = $3 OR wt.dest_account = $3)
         ORDER BY wt.time DESC
         LIMIT $2
         "#,
     )
     .bind(min_amount)
     .bind(limit)
+    .bind(account)
     .fetch_all(pool)
     .await?;
     Ok(rows)

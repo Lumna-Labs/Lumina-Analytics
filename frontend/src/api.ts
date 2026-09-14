@@ -182,8 +182,11 @@ export const api = {
     get<TokenSnapshotRow[]>(
       `/tokens/${encodeURIComponent(assetCode)}/${encodeURIComponent(assetIssuer)}/history?hours=${hours}`,
     ),
-  whaleTransactions: (minAmount = 10_000, limit = 100) =>
-    get<WhaleTransactionRow[]>(`/transactions/whales?min_amount=${minAmount}&limit=${limit}`),
+  whaleTransactions: (minAmount = 10_000, limit = 100, account?: string) =>
+    get<WhaleTransactionRow[]>(
+      `/transactions/whales?min_amount=${minAmount}&limit=${limit}` +
+        (account ? `&account=${encodeURIComponent(account)}` : ""),
+    ),
   liquidations: () => get<LiquidationsResponse>("/liquidations"),
   alerts: (limit = 100) => get<AlertRow[]>(`/alerts?limit=${limit}`),
 
