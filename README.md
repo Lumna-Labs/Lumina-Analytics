@@ -2,7 +2,10 @@
 
 Real-time analytics for the Stellar network: classic-AMM liquidity pools, issued-asset supply/holder
 counts, large ("whale") payments, and — when configured — Blend lending-pool liquidation risk.
-Backend in Rust (Axum + TimescaleDB), frontend in React.
+Configurable alerting (per-asset thresholds, custom risk bands, Slack/Discord/generic-webhook
+delivery) surfaces the events that matter, a watchlist pins the pools/tokens/positions you care
+about, and the dashboard updates live over Server-Sent Events. Backend in Rust (Axum + TimescaleDB),
+frontend in React.
 
 ## Architecture
 
@@ -137,6 +140,25 @@ loss.
 | `GET /metrics` | Prometheus-format request counters and cumulative latency, by route |
 
 `/pools` and `/tokens` accept `limit` (default 500, max 2000) and `offset` for pagination.
+
+## Dashboard pages
+
+| Route | Description |
+|---|---|
+| `/` | TVL overview: locked-liquidity chart, top pools, trending pools, recent whale payments |
+| `/pools` | All tracked pools, sortable/searchable/pinnable, CSV export |
+| `/pools/:poolId` | One pool's reserve/share history |
+| `/tokens` | All tracked issued assets, sortable/searchable/pinnable, CSV export |
+| `/tokens/:assetCode/:assetIssuer` | One asset's supply/holder history |
+| `/whales` | Large payments network-wide, sortable, CSV export; accounts link to Account Activity |
+| `/accounts/:address` | One account's full recorded whale-payment history (sent + received), CSV export |
+| `/liquidations` | Blend lending positions bucketed by risk band, pinnable, CSV export |
+| `/alerts` | Recorded alerts, filterable by severity, CSV export; refreshes on both a timer and live events |
+| `/alerts/settings` | Manage alert rules (per-asset whale thresholds, LTV-band overrides) and delivery channels |
+| `/watchlist` | Pinned pools/tokens/lending positions in one place |
+
+A "Live"/"Offline" pill in the sidebar shows the SSE connection status, and `WARNING`+ alerts pop a
+toast from anywhere in the app (see "Live updates" below).
 
 ## Alerting
 
