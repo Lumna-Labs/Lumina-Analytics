@@ -24,12 +24,16 @@ Backend in Rust (Axum + TimescaleDB), frontend in React.
              │ lumina-api  │◀──────▶│  Redis   │  (optional response cache)
              │  (Axum)     │        └──────────┘
              └──────┬──────┘
-                    │ REST + JSON
+                    │ REST + JSON, plus SSE (/events)
                     ▼
              ┌─────────────┐
              │  frontend   │  (React + Vite + Recharts)
              └─────────────┘
 ```
+
+`lumina-api` also keeps one long-lived Postgres `LISTEN`/`NOTIFY` connection open so newly recorded
+alerts (whale payments, lending-risk escalations) reach connected browsers over `/events` (SSE)
+within moments, without an extra message broker — see "Live updates" below.
 
 Two binaries share one crate:
 
@@ -124,8 +128,12 @@ loss.
 | `GET /tokens` | All tracked issued assets with their latest snapshot |
 | `GET /tokens/:asset_code/:asset_issuer/history?hours=24` | One asset's snapshot history |
 | `GET /transactions/whales?min_amount=10000&limit=100` | Large payments, enriched with a USD estimate where known |
-| `GET /liquidations` | Blend lending positions + risk-bucket summary (empty until `BLEND_POOL_IDS` is configured; `ltv`/`health_factor` stay `null` until `BLEND_ASSET_PRICES_USD` is too) |
+| `GET /liquidations` | Blend lending positions + risk-bucket summary (empty until `BLEND_POOL_IDS` is configured; `ltv`/`health_factor` stay `null` until `BLEND_ASSET_PRICES_USD` is too). Risk buckets honor any enabled `ltv_band` alert rules (see below), falling back to 70/85/95% LTV. |
 | `GET /alerts?limit=100` | Recently detected alert-worthy events (outsized whale payments, lending positions crossing into a higher risk band) |
+| `GET /alert-channels` / `POST /alert-channels` / `DELETE /alert-channels/:id` | Manage named Slack/Discord/generic-webhook alert delivery channels (see "Alert rules & channels") |
+| `GET /alert-rules` / `POST /alert-rules` / `PATCH /alert-rules/:id` / `DELETE /alert-rules/:id` | Manage per-asset whale-threshold and LTV-band overrides (see "Alert rules & channels") |
+| `GET /watchlist` / `POST /watchlist` / `DELETE /watchlist/:id` | Pin/unpin pools, tokens, or lending positions for the Watchlist page |
+| `GET /events` | Server-Sent Events stream of live alert notifications (see "Live updates") |
 | `GET /metrics` | Prometheus-format request counters and cumulative latency, by route |
 
 `/pools` and `/tokens` accept `limit` (default 500, max 2000) and `offset` for pagination.
@@ -143,6 +151,46 @@ table (visible on the dashboard's Alerts page), independent of any external conf
 Set `ALERT_WEBHOOK_URL` to also push `WARNING`+ alerts (configurable via `ALERT_MIN_SEVERITY`) to a
 Slack-compatible incoming webhook. Webhook delivery is best-effort: a failure is logged and never
 affects ingestion or the recorded alert.
+
+## Alert rules & channels
+
+Beyond the single `ALERT_WEBHOOK_URL`/`ALERT_MIN_SEVERITY` env vars (which keep working unchanged),
+the dashboard's Alerts page has a "Manage rules & channels" panel backed by `/alert-channels` and
+`/alert-rules`, for changes that don't need a redeploy:
+
+- **Channels** (`alert_channels` table): any number of named Slack, Discord, or generic-webhook
+  destinations, each with its own minimum-severity gate. Delivered in addition to
+  `ALERT_WEBHOOK_URL`, independently — one channel's failure never blocks another.
+- **Whale-threshold rules**: override `WHALE_THRESHOLD` for one specific asset (code + issuer, or
+  native XLM). An asset with no matching rule keeps using the global default.
+- **LTV-band rules**: override one named risk-band cutoff (`MEDIUM`, `HIGH`, or `CRITICAL`,
+  default 70/85/95% LTV). Applied consistently to both the `/liquidations` risk-bucket summary and
+  the ingester's upward-crossing alert detection, so the dashboard and the alerts it fires always
+  agree on what counts as "HIGH".
+
+Rules are reloaded once per ingest cycle (not once per event), so a change made in the UI takes
+effect within one `POLL_INTERVAL_SECS`.
+
+## Watchlist
+
+Click the star next to any pool, token, or lending position to pin it to `/watchlist` — a single
+shared list (this project has no per-user auth) for an at-a-glance view across otherwise-separate
+pages. Backed by the `watchlist_items` table; pinning the same item twice just updates its label
+rather than erroring.
+
+## Live updates
+
+The Alerts and Whale Tracker pages, plus a toast notification for `WARNING`+ alerts anywhere in the
+app, update within moments of a new alert via Server-Sent Events (`GET /events`) instead of waiting
+for the next poll. The "Live"/"Offline" pill in the sidebar reflects the connection.
+
+Mechanically: `lumina-ingest` and `lumina-api` are separate processes, so getting a new alert from
+one to browsers connected to the other needs a cross-process bridge — this project uses Postgres
+`LISTEN`/`NOTIFY` rather than adding a message broker (see `src/events.rs`). This is a freshness
+nicety layered on top of polling, never a dependency: every event pushed over SSE was already
+written to a table a client can read directly, so a browser that never connects, misses a message,
+or hits a proxy that blocks SSE still sees everything on its next regular poll — nothing is only
+available live.
 
 ## Operational hardening
 

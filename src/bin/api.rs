@@ -4,6 +4,7 @@ use lumina::api::{build_router, AppState};
 use lumina::cache::Cache;
 use lumina::config::Config;
 use lumina::db;
+use lumina::events;
 use lumina::metrics::Metrics;
 use lumina::ratelimit::RateLimiter;
 
@@ -25,6 +26,12 @@ async fn main() -> anyhow::Result<()> {
             config.rate_limit_burst
         );
     }
+    let event_bus = events::new_bus();
+    tokio::spawn(events::listen_and_forward(
+        config.database_url.clone(),
+        event_bus.clone(),
+    ));
+
     let state = AppState {
         db: pool,
         cache,
@@ -33,6 +40,7 @@ async fn main() -> anyhow::Result<()> {
             config.rate_limit_rps,
             config.rate_limit_burst,
         )),
+        events: event_bus,
     };
     let app = build_router(state);
 

@@ -1,7 +1,7 @@
 import { useState } from "react";
 import { api } from "../api";
 import type { WhaleTransactionRow } from "../api";
-import { usePolled, useSortableRows } from "../hooks";
+import { usePolled, useSortableRows, useLiveEvents } from "../hooks";
 import { ErrorState, LoadingState } from "../components/States";
 import { SortableTh } from "../components/SortableTh";
 import { downloadCsv, toCsv } from "../csv";
@@ -12,6 +12,10 @@ type SortKey = keyof WhaleTransactionRow;
 export function Whales() {
   const [minAmount, setMinAmount] = useState(10_000);
   const whales = usePolled(() => api.whaleTransactions(minAmount, 200), [minAmount], 20_000);
+
+  useLiveEvents((event) => {
+    if (event.type === "alert" && event.kind === "whale_payment") whales.refetch();
+  });
   const { sorted, sortKey, sortDir, toggleSort } = useSortableRows<WhaleTransactionRow>(
     whales.data ?? [],
     "time",

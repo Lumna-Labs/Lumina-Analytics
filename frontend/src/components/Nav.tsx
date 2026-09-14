@@ -1,6 +1,7 @@
 import { NavLink } from "react-router-dom";
 import { useThemeMode } from "../theme";
 import type { ThemeMode } from "../theme";
+import { LiveBadge } from "./LiveBadge";
 
 const links = [
   { to: "/", label: "TVL Overview", end: true },
@@ -9,6 +10,7 @@ const links = [
   { to: "/whales", label: "Whale Tracker" },
   { to: "/liquidations", label: "Liquidations" },
   { to: "/alerts", label: "Alerts" },
+  { to: "/watchlist", label: "Watchlist" },
 ];
 
 const MODES: { mode: ThemeMode; label: string }[] = [
@@ -26,6 +28,7 @@ export function Nav() {
         <span className="brand-mark" />
         Lumina
       </div>
+      <LiveBadge />
       <nav>
         {links.map((l) => (
           <NavLink

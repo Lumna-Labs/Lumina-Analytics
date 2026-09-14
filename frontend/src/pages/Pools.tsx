@@ -2,9 +2,10 @@ import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api";
 import type { PoolWithLatest } from "../api";
-import { usePolled, useSortableRows } from "../hooks";
+import { usePolled, useSortableRows, useWatchlist } from "../hooks";
 import { ErrorState, LoadingState } from "../components/States";
 import { SortableTh } from "../components/SortableTh";
+import { PinButton } from "../components/PinButton";
 import { downloadCsv, toCsv } from "../csv";
 import { fmtCompact, fmtTime, pairLabel } from "../format";
 
@@ -14,6 +15,7 @@ export function Pools() {
   const navigate = useNavigate();
   const pools = usePolled(() => api.pools(), []);
   const [query, setQuery] = useState("");
+  const watchlist = useWatchlist("pool");
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -81,6 +83,7 @@ export function Pools() {
           <table>
             <thead>
               <tr>
+                <th></th>
                 <SortableTh<SortKey> label="Pair" column="asset_a" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
                 <SortableTh<SortKey> label="Fee" column="fee_bp" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
                 <SortableTh<SortKey> label="Reserve A" column="reserve_a" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
@@ -93,6 +96,13 @@ export function Pools() {
             <tbody>
               {sorted.map((p) => (
                 <tr key={p.pool_id} className="clickable" onClick={() => navigate(`/pools/${p.pool_id}`)}>
+                  <td>
+                    <PinButton
+                      pinned={watchlist.isPinned(p.pool_id)}
+                      busy={watchlist.isBusy(p.pool_id)}
+                      onToggle={() => watchlist.toggle(p.pool_id, pairLabel(p.asset_a, p.asset_b))}
+                    />
+                  </td>
                   <td>{pairLabel(p.asset_a, p.asset_b)}</td>
                   <td>{(p.fee_bp / 100).toFixed(2)}%</td>
                   <td>{fmtCompact(p.reserve_a)}</td>
@@ -104,7 +114,7 @@ export function Pools() {
               ))}
               {filtered.length === 0 && (
                 <tr>
-                  <td colSpan={7}>No pools match "{query}".</td>
+                  <td colSpan={8}>No pools match "{query}".</td>
                 </tr>
               )}
             </tbody>

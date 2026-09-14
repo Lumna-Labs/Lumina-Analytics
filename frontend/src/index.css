@@ -444,6 +444,104 @@ select:focus {
   border-color: var(--text-secondary);
 }
 
+.live-badge {
+  background: var(--border);
+  color: var(--muted);
+  margin: 2px 10px 12px;
+}
+
+.live-badge .pill-dot {
+  background: var(--muted);
+}
+
+.live-badge.live-on {
+  color: var(--good);
+}
+
+.live-badge.live-on .pill-dot {
+  background: var(--good);
+  box-shadow: 0 0 0 3px rgba(12, 163, 12, 0.18);
+}
+
+.pin-btn {
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  font-size: 16px;
+  line-height: 1;
+  cursor: pointer;
+  padding: 2px 4px;
+  border-radius: 6px;
+}
+
+.pin-btn:hover {
+  color: var(--warning);
+  background: var(--border);
+}
+
+.pin-btn.pinned {
+  color: var(--warning);
+}
+
+.pin-btn:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.toast-stack {
+  position: fixed;
+  bottom: 18px;
+  right: 18px;
+  display: flex;
+  flex-direction: column;
+  gap: 8px;
+  z-index: 1000;
+  max-width: 360px;
+}
+
+.toast {
+  display: flex;
+  align-items: flex-start;
+  gap: 8px;
+  background: var(--surface);
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  padding: 10px 12px;
+  box-shadow: 0 8px 24px rgba(0, 0, 0, 0.18);
+  font-size: 12.5px;
+  animation: toast-in 0.15s ease-out;
+}
+
+@keyframes toast-in {
+  from {
+    opacity: 0;
+    transform: translateY(6px);
+  }
+  to {
+    opacity: 1;
+    transform: translateY(0);
+  }
+}
+
+.toast-message {
+  flex: 1;
+  color: var(--text-primary);
+}
+
+.toast-dismiss {
+  border: none;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  font-size: 15px;
+  line-height: 1;
+  padding: 0 2px;
+}
+
+.toast-dismiss:hover {
+  color: var(--text-primary);
+}
+
 @media (max-width: 780px) {
   .app-shell {
     flex-direction: column;

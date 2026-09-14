@@ -6,6 +6,7 @@ use axum::Router;
 use sqlx::PgPool;
 
 use crate::cache::Cache;
+use crate::events::EventBus;
 use crate::metrics::Metrics;
 use crate::ratelimit::RateLimiter;
 
@@ -15,6 +16,7 @@ pub struct AppState {
     pub cache: Cache,
     pub metrics: Arc<Metrics>,
     pub rate_limiter: Arc<RateLimiter>,
+    pub events: EventBus,
 }
 
 pub fn build_router(state: AppState) -> Router {

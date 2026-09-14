@@ -31,6 +31,7 @@ use serde_json::json;
 use sqlx::PgPool;
 use stellar_xdr::{Limits, ReadXdr, ScAddress, ScVal};
 
+use crate::alert_rules::{self, LtvBands};
 use crate::alerts;
 use crate::config::Config;
 use crate::db;
@@ -218,6 +219,8 @@ pub async fn ingest_lending_cycle(
 ) -> anyhow::Result<()> {
     let client = SorobanClient::new(config.soroban_rpc_url.clone());
     let prices = config.blend_asset_prices_usd();
+    let rules = db::list_alert_rules(pool).await.unwrap_or_default();
+    let bands = alert_rules::resolve_ltv_bands(&rules);
 
     let cursor = db::get_ingest_cursor(pool, EVENTS_CURSOR_KEY).await?;
     let start_ledger = match &cursor {
@@ -245,7 +248,7 @@ pub async fn ingest_lending_cycle(
 
     let mut processed = 0;
     for event in &events {
-        match process_event(pool, http, config, &prices, event).await {
+        match process_event(pool, http, config, &prices, &bands, event).await {
             Ok(true) => processed += 1,
             Ok(false) => {}
             Err(e) => tracing::debug!("skipping unparseable Blend event {}: {e:?}", event.id),
@@ -292,6 +295,7 @@ async fn process_event(
     http: &reqwest::Client,
     config: &Config,
     prices: &HashMap<String, Decimal>,
+    bands: &LtvBands,
     event: &RpcEvent,
 ) -> anyhow::Result<bool> {
     let topics: Vec<ScVal> = event
@@ -338,7 +342,10 @@ async fn process_event(
         .map_err(|e| anyhow::anyhow!("bad ledgerClosedAt: {e:?}"))?;
 
     let latest = db::latest_lending_position(pool, "blend", &event.contract_id, &account).await?;
-    let previous_risk_level = latest.as_ref().and_then(|l| l.ltv).map(logic::risk_level);
+    let previous_risk_level = latest
+        .as_ref()
+        .and_then(|l| l.ltv)
+        .map(|v| alert_rules::risk_level_with_bands(v, bands));
     let mut collateral_asset = latest
         .as_ref()
         .map(|l| l.collateral_asset.clone())
@@ -392,7 +399,7 @@ async fn process_event(
     .await?;
 
     if let Some(ltv_value) = ltv {
-        let new_level = logic::risk_level(ltv_value);
+        let new_level = alert_rules::risk_level_with_bands(ltv_value, bands);
         let escalated = matches!(new_level, "HIGH" | "CRITICAL")
             && previous_risk_level
                 .is_none_or(|prev| logic::risk_rank(new_level) > logic::risk_rank(prev));

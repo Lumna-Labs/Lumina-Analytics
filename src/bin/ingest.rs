@@ -6,11 +6,13 @@ use rust_decimal::Decimal;
 use serde_json::json;
 use sqlx::PgPool;
 
+use lumina::alert_rules;
 use lumina::alerts::{self, Severity};
 use lumina::config::Config;
 use lumina::db;
 use lumina::horizon::{HorizonClient, LiquidityPool, PaymentRecord};
 use lumina::logic;
+use lumina::models::AlertRuleRow;
 use lumina::pricing;
 use lumina::soroban;
 
@@ -142,6 +144,10 @@ async fn ingest_payments(
     config: &Config,
 ) -> anyhow::Result<()> {
     let cursor = db::get_ingest_cursor(pool, PAYMENTS_CURSOR_KEY).await?;
+    // Reloaded once per cycle (not once per payment): fresh enough to react
+    // to a rule an operator just added via `/alert-rules` within one poll
+    // interval, without a DB round-trip per payment.
+    let rules = db::list_alert_rules(pool).await.unwrap_or_default();
 
     let Some(cursor) = cursor else {
         let latest = horizon.latest_payments_page(1).await?;
@@ -171,7 +177,9 @@ async fn ingest_payments(
     let mut pending_alerts = Vec::new();
     let mut last_cursor = cursor;
     for p in &payments {
-        if let Some(alert) = ingest_whale_payment(&mut tx, p, config.whale_threshold).await? {
+        if let Some(alert) =
+            ingest_whale_payment(&mut tx, p, config.whale_threshold, &rules).await?
+        {
             pending_alerts.push(alert);
         }
         last_cursor = p.paging_token.clone();
@@ -315,19 +323,17 @@ async fn ingest_pool(
     Ok(())
 }
 
-/// Returns a pending alert if the payment met the whale threshold and was
-/// newly recorded (not a cursor-replay duplicate of one already stored).
+/// Returns a pending alert if the payment met the whale threshold (the
+/// global default, or a per-asset override from an enabled `whale_threshold`
+/// alert rule — see `alert_rules::resolve_whale_threshold`) and was newly
+/// recorded (not a cursor-replay duplicate of one already stored).
 async fn ingest_whale_payment(
     tx: &mut sqlx::PgConnection,
     p: &PaymentRecord,
-    threshold: f64,
+    default_threshold: f64,
+    rules: &[AlertRuleRow],
 ) -> anyhow::Result<Option<PendingAlert>> {
     let Some(raw_amount) = &p.amount else {
-        return Ok(None);
-    };
-    let amount = Decimal::from_str(raw_amount)?;
-    let threshold = Decimal::try_from(threshold).unwrap_or_default();
-    let Some(amount) = logic::whale_amount(&p.op_type, Some(amount), threshold) else {
         return Ok(None);
     };
 
@@ -336,6 +342,19 @@ async fn ingest_whale_payment(
         p.asset_code.as_deref(),
         p.asset_issuer.as_deref(),
     );
+    let default_threshold = Decimal::try_from(default_threshold).unwrap_or_default();
+    let threshold = alert_rules::resolve_whale_threshold(
+        rules,
+        &asset_code,
+        asset_issuer.as_deref(),
+        default_threshold,
+    );
+
+    let amount = Decimal::from_str(raw_amount)?;
+    let Some(amount) = logic::whale_amount(&p.op_type, Some(amount), threshold) else {
+        return Ok(None);
+    };
+
     let source = p
         .from
         .clone()

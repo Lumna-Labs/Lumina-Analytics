@@ -1,8 +1,10 @@
+pub mod alert_rules;
 pub mod alerts;
 pub mod api;
 pub mod cache;
 pub mod config;
 pub mod db;
+pub mod events;
 pub mod horizon;
 pub mod logic;
 pub mod metrics;

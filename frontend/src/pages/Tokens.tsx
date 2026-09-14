@@ -2,9 +2,10 @@ import { useMemo, useState } from "react";
 import { useNavigate } from "react-router-dom";
 import { api } from "../api";
 import type { TokenWithLatest } from "../api";
-import { usePolled, useSortableRows } from "../hooks";
+import { usePolled, useSortableRows, useWatchlist } from "../hooks";
 import { ErrorState, LoadingState } from "../components/States";
 import { SortableTh } from "../components/SortableTh";
+import { PinButton } from "../components/PinButton";
 import { downloadCsv, toCsv } from "../csv";
 import { fmtCompact, fmtTime, truncateMiddle } from "../format";
 
@@ -14,6 +15,7 @@ export function Tokens() {
   const navigate = useNavigate();
   const tokens = usePolled(() => api.tokens(), []);
   const [query, setQuery] = useState("");
+  const watchlist = useWatchlist("token");
 
   const filtered = useMemo(() => {
     const q = query.trim().toLowerCase();
@@ -74,6 +76,7 @@ export function Tokens() {
           <table>
             <thead>
               <tr>
+                <th></th>
                 <SortableTh<SortKey> label="Code" column="asset_code" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
                 <SortableTh<SortKey> label="Issuer" column="asset_issuer" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
                 <SortableTh<SortKey> label="Supply" column="amount" sortKey={sortKey} sortDir={sortDir} onSort={toggleSort} />
@@ -83,23 +86,33 @@ export function Tokens() {
               </tr>
             </thead>
             <tbody>
-              {sorted.map((t) => (
-                <tr
-                  key={`${t.asset_code}:${t.asset_issuer}`}
-                  className="clickable"
-                  onClick={() => navigate(`/tokens/${t.asset_code}/${t.asset_issuer}`)}
-                >
-                  <td>{t.asset_code}</td>
-                  <td className="mono">{truncateMiddle(t.asset_issuer)}</td>
-                  <td>{fmtCompact(t.amount)}</td>
-                  <td>{t.num_accounts ?? "—"}</td>
-                  <td>{t.num_claimable_balances ?? "—"}</td>
-                  <td>{fmtTime(t.time)}</td>
-                </tr>
-              ))}
+              {sorted.map((t) => {
+                const key = `${t.asset_code}:${t.asset_issuer}`;
+                return (
+                  <tr
+                    key={key}
+                    className="clickable"
+                    onClick={() => navigate(`/tokens/${t.asset_code}/${t.asset_issuer}`)}
+                  >
+                    <td>
+                      <PinButton
+                        pinned={watchlist.isPinned(key)}
+                        busy={watchlist.isBusy(key)}
+                        onToggle={() => watchlist.toggle(key, t.asset_code)}
+                      />
+                    </td>
+                    <td>{t.asset_code}</td>
+                    <td className="mono">{truncateMiddle(t.asset_issuer)}</td>
+                    <td>{fmtCompact(t.amount)}</td>
+                    <td>{t.num_accounts ?? "—"}</td>
+                    <td>{t.num_claimable_balances ?? "—"}</td>
+                    <td>{fmtTime(t.time)}</td>
+                  </tr>
+                );
+              })}
               {filtered.length === 0 && (
                 <tr>
-                  <td colSpan={6}>No assets match "{query}".</td>
+                  <td colSpan={7}>No assets match "{query}".</td>
                 </tr>
               )}
             </tbody>

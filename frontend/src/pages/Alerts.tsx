@@ -1,7 +1,8 @@
 import { useMemo, useState } from "react";
+import { Link } from "react-router-dom";
 import { api } from "../api";
 import type { AlertRow } from "../api";
-import { usePolled } from "../hooks";
+import { usePolled, useLiveEvents } from "../hooks";
 import { EmptyState, ErrorState, LoadingState } from "../components/States";
 import { fmtRelative, fmtTime } from "../format";
 
@@ -16,6 +17,10 @@ export function Alerts() {
   const alerts = usePolled(() => api.alerts(200), [], 20_000);
   const [severity, setSeverity] = useState<string>("ALL");
 
+  useLiveEvents((event) => {
+    if (event.type === "alert") alerts.refetch();
+  });
+
   const filtered = useMemo(() => {
     const rows = alerts.data ?? [];
     return severity === "ALL" ? rows : rows.filter((a) => a.severity === severity);
@@ -28,8 +33,14 @@ export function Alerts() {
         <p className="page-subtitle">
           Outsized whale payments and lending positions crossing into a higher liquidation-risk
           band, detected each ingest cycle. Always recorded here regardless of whether
-          ALERT_WEBHOOK_URL is configured. Refreshes every 20s.
+          ALERT_WEBHOOK_URL is configured. Refreshes every 20s, plus instantly on a live event.
         </p>
+      </div>
+
+      <div className="toolbar">
+        <Link to="/alerts/settings" className="export-btn">
+          Manage rules &amp; channels
+        </Link>
       </div>
 
       {alerts.error && <ErrorState message={alerts.error} />}

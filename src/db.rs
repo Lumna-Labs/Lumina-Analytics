@@ -4,8 +4,9 @@ use sqlx::postgres::PgPoolOptions;
 use sqlx::PgPool;
 
 use crate::models::{
-    AlertRow, LendingPositionRow, LiquidationRiskBucket, PoolSnapshotRow, PoolTrendRaw,
-    PoolWithLatest, TokenSnapshotRow, TokenWithLatest, TvlPoint, TvlPointRaw, WhaleTransactionRow,
+    AlertChannelRow, AlertRow, AlertRuleRow, LendingPositionRow, LiquidationRiskBucket,
+    PoolSnapshotRow, PoolTrendRaw, PoolWithLatest, TokenSnapshotRow, TokenWithLatest, TvlPoint,
+    TvlPointRaw, WatchlistItemRow, WhaleTransactionRow,
 };
 
 pub async fn connect(database_url: &str) -> anyhow::Result<PgPool> {
@@ -470,7 +471,16 @@ pub async fn insert_lending_position(
 
 /// Position count and total debt bucketed by LTV risk band, using each
 /// account's latest snapshot. Empty until lending-protocol ingestion exists.
-pub async fn liquidation_risk_summary(pool: &PgPool) -> anyhow::Result<Vec<LiquidationRiskBucket>> {
+/// Band cutoffs are passed in (see `alert_rules::resolve_ltv_bands`) rather
+/// than hardcoded, so an operator's `ltv_band` alert rules apply here too —
+/// the dashboard's risk buckets and the alerting that escalates on them stay
+/// in sync.
+pub async fn liquidation_risk_summary(
+    pool: &PgPool,
+    medium: Decimal,
+    high: Decimal,
+    critical: Decimal,
+) -> anyhow::Result<Vec<LiquidationRiskBucket>> {
     let rows = sqlx::query_as::<_, LiquidationRiskBucket>(
         r#"
         WITH latest AS (
@@ -480,9 +490,9 @@ pub async fn liquidation_risk_summary(pool: &PgPool) -> anyhow::Result<Vec<Liqui
         )
         SELECT
             CASE
-                WHEN ltv >= 95 THEN 'CRITICAL'
-                WHEN ltv >= 85 THEN 'HIGH'
-                WHEN ltv >= 70 THEN 'MEDIUM'
+                WHEN ltv >= $3 THEN 'CRITICAL'
+                WHEN ltv >= $2 THEN 'HIGH'
+                WHEN ltv >= $1 THEN 'MEDIUM'
                 ELSE 'LOW'
             END AS risk_level,
             COUNT(*) AS position_count,
@@ -493,6 +503,9 @@ pub async fn liquidation_risk_summary(pool: &PgPool) -> anyhow::Result<Vec<Liqui
         ORDER BY risk_level
         "#,
     )
+    .bind(medium)
+    .bind(high)
+    .bind(critical)
     .fetch_all(pool)
     .await?;
     Ok(rows)
@@ -609,4 +622,219 @@ pub async fn tvl_series(pool: &PgPool, since: DateTime<Utc>) -> anyhow::Result<V
     .fetch_all(pool)
     .await?;
     Ok(rows.into_iter().map(TvlPoint::from).collect())
+}
+
+// ---- live events (Postgres NOTIFY, see `events`) ----
+
+/// Publishes `payload` on `channel` via `pg_notify`. Best-effort by design —
+/// callers treat a failure here as non-fatal (see call sites in `alerts`):
+/// every value that goes out this way is also sitting in a table a client
+/// can poll, so a dropped notification delays a live update, it never loses
+/// data.
+pub async fn notify_event<'e, E>(executor: E, channel: &str, payload: &str) -> anyhow::Result<()>
+where
+    E: sqlx::PgExecutor<'e>,
+{
+    sqlx::query("SELECT pg_notify($1, $2)")
+        .bind(channel)
+        .bind(payload)
+        .execute(executor)
+        .await?;
+    Ok(())
+}
+
+// ---- alert channels ----
+
+const ALERT_CHANNEL_COLUMNS: &str = "id, name, kind, url, min_severity, enabled, created_at";
+
+pub async fn list_alert_channels(pool: &PgPool) -> anyhow::Result<Vec<AlertChannelRow>> {
+    let rows = sqlx::query_as::<_, AlertChannelRow>(&format!(
+        "SELECT {ALERT_CHANNEL_COLUMNS} FROM alert_channels ORDER BY id"
+    ))
+    .fetch_all(pool)
+    .await?;
+    Ok(rows)
+}
+
+/// Channels actually eligible to receive a delivery. Split out from
+/// `list_alert_channels` so the read path used on every alert doesn't have
+/// to filter disabled rows itself.
+pub async fn list_enabled_alert_channels(pool: &PgPool) -> anyhow::Result<Vec<AlertChannelRow>> {
+    let rows = sqlx::query_as::<_, AlertChannelRow>(&format!(
+        "SELECT {ALERT_CHANNEL_COLUMNS} FROM alert_channels WHERE enabled ORDER BY id"
+    ))
+    .fetch_all(pool)
+    .await?;
+    Ok(rows)
+}
+
+pub async fn insert_alert_channel(
+    pool: &PgPool,
+    name: &str,
+    kind: &str,
+    url: &str,
+    min_severity: &str,
+    enabled: bool,
+) -> anyhow::Result<AlertChannelRow> {
+    let row = sqlx::query_as::<_, AlertChannelRow>(&format!(
+        r#"
+        INSERT INTO alert_channels (name, kind, url, min_severity, enabled)
+        VALUES ($1, $2, $3, $4, $5)
+        RETURNING {ALERT_CHANNEL_COLUMNS}
+        "#
+    ))
+    .bind(name)
+    .bind(kind)
+    .bind(url)
+    .bind(min_severity)
+    .bind(enabled)
+    .fetch_one(pool)
+    .await?;
+    Ok(row)
+}
+
+pub async fn update_alert_channel(
+    pool: &PgPool,
+    id: i64,
+    min_severity: &str,
+    enabled: bool,
+) -> anyhow::Result<Option<AlertChannelRow>> {
+    let row = sqlx::query_as::<_, AlertChannelRow>(&format!(
+        r#"
+        UPDATE alert_channels SET min_severity = $2, enabled = $3
+        WHERE id = $1
+        RETURNING {ALERT_CHANNEL_COLUMNS}
+        "#
+    ))
+    .bind(id)
+    .bind(min_severity)
+    .bind(enabled)
+    .fetch_optional(pool)
+    .await?;
+    Ok(row)
+}
+
+pub async fn delete_alert_channel(pool: &PgPool, id: i64) -> anyhow::Result<bool> {
+    let result = sqlx::query("DELETE FROM alert_channels WHERE id = $1")
+        .bind(id)
+        .execute(pool)
+        .await?;
+    Ok(result.rows_affected() > 0)
+}
+
+// ---- alert rules ----
+
+const ALERT_RULE_COLUMNS: &str =
+    "id, name, rule_type, asset_code, asset_issuer, threshold, enabled, created_at";
+
+pub async fn list_alert_rules(pool: &PgPool) -> anyhow::Result<Vec<AlertRuleRow>> {
+    let rows = sqlx::query_as::<_, AlertRuleRow>(&format!(
+        "SELECT {ALERT_RULE_COLUMNS} FROM alert_rules ORDER BY id"
+    ))
+    .fetch_all(pool)
+    .await?;
+    Ok(rows)
+}
+
+#[allow(clippy::too_many_arguments)]
+pub async fn insert_alert_rule(
+    pool: &PgPool,
+    name: &str,
+    rule_type: &str,
+    asset_code: Option<&str>,
+    asset_issuer: Option<&str>,
+    threshold: Decimal,
+    enabled: bool,
+) -> anyhow::Result<AlertRuleRow> {
+    let row = sqlx::query_as::<_, AlertRuleRow>(&format!(
+        r#"
+        INSERT INTO alert_rules (name, rule_type, asset_code, asset_issuer, threshold, enabled)
+        VALUES ($1, $2, $3, $4, $5, $6)
+        RETURNING {ALERT_RULE_COLUMNS}
+        "#
+    ))
+    .bind(name)
+    .bind(rule_type)
+    .bind(asset_code)
+    .bind(asset_issuer)
+    .bind(threshold)
+    .bind(enabled)
+    .fetch_one(pool)
+    .await?;
+    Ok(row)
+}
+
+pub async fn update_alert_rule(
+    pool: &PgPool,
+    id: i64,
+    threshold: Decimal,
+    enabled: bool,
+) -> anyhow::Result<Option<AlertRuleRow>> {
+    let row = sqlx::query_as::<_, AlertRuleRow>(&format!(
+        r#"
+        UPDATE alert_rules SET threshold = $2, enabled = $3
+        WHERE id = $1
+        RETURNING {ALERT_RULE_COLUMNS}
+        "#
+    ))
+    .bind(id)
+    .bind(threshold)
+    .bind(enabled)
+    .fetch_optional(pool)
+    .await?;
+    Ok(row)
+}
+
+pub async fn delete_alert_rule(pool: &PgPool, id: i64) -> anyhow::Result<bool> {
+    let result = sqlx::query("DELETE FROM alert_rules WHERE id = $1")
+        .bind(id)
+        .execute(pool)
+        .await?;
+    Ok(result.rows_affected() > 0)
+}
+
+// ---- watchlist ----
+
+const WATCHLIST_COLUMNS: &str = "id, item_type, item_key, label, created_at";
+
+pub async fn list_watchlist_items(pool: &PgPool) -> anyhow::Result<Vec<WatchlistItemRow>> {
+    let rows = sqlx::query_as::<_, WatchlistItemRow>(&format!(
+        "SELECT {WATCHLIST_COLUMNS} FROM watchlist_items ORDER BY created_at DESC"
+    ))
+    .fetch_all(pool)
+    .await?;
+    Ok(rows)
+}
+
+/// Upserts by `(item_type, item_key)` so pinning the same pool/token twice
+/// (e.g. a double-click) just refreshes its label instead of erroring or
+/// creating a duplicate row.
+pub async fn upsert_watchlist_item(
+    pool: &PgPool,
+    item_type: &str,
+    item_key: &str,
+    label: &str,
+) -> anyhow::Result<WatchlistItemRow> {
+    let row = sqlx::query_as::<_, WatchlistItemRow>(&format!(
+        r#"
+        INSERT INTO watchlist_items (item_type, item_key, label)
+        VALUES ($1, $2, $3)
+        ON CONFLICT (item_type, item_key) DO UPDATE SET label = EXCLUDED.label
+        RETURNING {WATCHLIST_COLUMNS}
+        "#
+    ))
+    .bind(item_type)
+    .bind(item_key)
+    .bind(label)
+    .fetch_one(pool)
+    .await?;
+    Ok(row)
+}
+
+pub async fn delete_watchlist_item(pool: &PgPool, id: i64) -> anyhow::Result<bool> {
+    let result = sqlx::query("DELETE FROM watchlist_items WHERE id = $1")
+        .bind(id)
+        .execute(pool)
+        .await?;
+    Ok(result.rows_affected() > 0)
 }

@@ -29,3 +29,5 @@ dotenvy = "0.15"
 stellar-xdr = { version = "28.0.0", features = ["base64"] }
 redis = { version = "1.7.0", features = ["tokio-comp", "connection-manager"] }
 stellar-strkey = "0.0.13"
+tokio-stream = { version = "0.1", features = ["sync"] }
+futures-util = "0.3"

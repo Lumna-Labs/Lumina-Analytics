@@ -1,12 +1,14 @@
 import { api } from "../api";
-import { usePolled } from "../hooks";
+import { usePolled, useWatchlist } from "../hooks";
 import { EmptyState, ErrorState, LoadingState } from "../components/States";
+import { PinButton } from "../components/PinButton";
 import { riskColor, useChartTheme } from "../theme";
 import { fmtCompact, truncateMiddle } from "../format";
 
 export function Liquidations() {
   const theme = useChartTheme();
   const liquidations = usePolled(() => api.liquidations(), []);
+  const watchlist = useWatchlist("lending_position");
 
   const summary = liquidations.data?.summary ?? [];
   const positions = liquidations.data?.positions ?? [];
@@ -56,6 +58,7 @@ export function Liquidations() {
             <table>
               <thead>
                 <tr>
+                  <th></th>
                   <th>Account</th>
                   <th>Pool</th>
                   <th>Collateral</th>
@@ -65,20 +68,30 @@ export function Liquidations() {
                 </tr>
               </thead>
               <tbody>
-                {positions.map((p) => (
-                  <tr key={`${p.protocol}:${p.pool_contract}:${p.account}`}>
-                    <td className="mono">{truncateMiddle(p.account)}</td>
-                    <td className="mono">{truncateMiddle(p.pool_contract)}</td>
-                    <td className="mono">
-                      {fmtCompact(p.collateral_amount)} {truncateMiddle(p.collateral_asset, 4, 4)}
-                    </td>
-                    <td className="mono">
-                      {fmtCompact(p.debt_amount)} {truncateMiddle(p.debt_asset, 4, 4)}
-                    </td>
-                    <td>{p.ltv ? `${parseFloat(p.ltv).toFixed(1)}%` : "—"}</td>
-                    <td>{p.health_factor ? parseFloat(p.health_factor).toFixed(2) : "—"}</td>
-                  </tr>
-                ))}
+                {positions.map((p) => {
+                  const key = `${p.protocol}:${p.pool_contract}:${p.account}`;
+                  return (
+                    <tr key={key}>
+                      <td>
+                        <PinButton
+                          pinned={watchlist.isPinned(key)}
+                          busy={watchlist.isBusy(key)}
+                          onToggle={() => watchlist.toggle(key, truncateMiddle(p.account))}
+                        />
+                      </td>
+                      <td className="mono">{truncateMiddle(p.account)}</td>
+                      <td className="mono">{truncateMiddle(p.pool_contract)}</td>
+                      <td className="mono">
+                        {fmtCompact(p.collateral_amount)} {truncateMiddle(p.collateral_asset, 4, 4)}
+                      </td>
+                      <td className="mono">
+                        {fmtCompact(p.debt_amount)} {truncateMiddle(p.debt_asset, 4, 4)}
+                      </td>
+                      <td>{p.ltv ? `${parseFloat(p.ltv).toFixed(1)}%` : "—"}</td>
+                      <td>{p.health_factor ? parseFloat(p.health_factor).toFixed(2) : "—"}</td>
+                    </tr>
+                  );
+                })}
               </tbody>
             </table>
           </div>

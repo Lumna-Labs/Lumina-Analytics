@@ -73,10 +73,14 @@ pub fn severity_for_whale_multiple(amount: Decimal, threshold: Decimal) -> Sever
     }
 }
 
-/// Records an alert and, if a webhook is configured and this alert meets the
-/// configured minimum severity, best-effort delivers it there. A webhook
-/// failure (timeout, non-2xx, DNS) is logged and never propagated — alerting
-/// must never be able to take down ingestion.
+/// Records an alert, best-effort delivers it to the legacy single
+/// `ALERT_WEBHOOK_URL` (if configured) and every DB-configured alert channel
+/// (`alert_channels`) that meets its own minimum severity, and publishes a
+/// live-event notification for `/events` SSE subscribers. Every delivery
+/// step is best-effort and independent: a failure in one (bad URL, timeout,
+/// Postgres NOTIFY hiccup) is logged and never propagated or allowed to
+/// block another — alerting must never be able to take down ingestion, and
+/// the row is already durably recorded regardless.
 pub async fn record(
     pool: &PgPool,
     http: &reqwest::Client,
@@ -89,14 +93,36 @@ pub async fn record(
     let now = Utc::now();
     db::insert_alert(pool, now, kind, severity.as_str(), &message, &details).await?;
 
+    deliver_legacy_webhook(http, config, severity, &message).await;
+    deliver_to_channels(pool, http, severity, &message).await;
+
+    let event = json!({
+        "type": "alert",
+        "kind": kind,
+        "severity": severity.as_str(),
+        "message": message,
+        "time": now,
+    });
+    if let Err(e) = db::notify_event(pool, crate::events::CHANNEL, &event.to_string()).await {
+        tracing::debug!("failed to publish live-event notification: {e}");
+    }
+
+    Ok(())
+}
+
+async fn deliver_legacy_webhook(
+    http: &reqwest::Client,
+    config: &Config,
+    severity: Severity,
+    message: &str,
+) {
     let Some(webhook_url) = &config.alert_webhook_url else {
-        return Ok(());
+        return;
     };
     let min_severity = Severity::parse(&config.alert_min_severity).unwrap_or(Severity::Warning);
     if severity < min_severity {
-        return Ok(());
+        return;
     }
-
     let body = json!({ "text": format!("[{}] {}", severity.as_str(), message) });
     if let Err(e) = http
         .post(webhook_url)
@@ -105,9 +131,55 @@ pub async fn record(
         .await
         .and_then(|r| r.error_for_status())
     {
-        tracing::warn!("alert webhook delivery failed: {e}");
+        tracing::warn!("legacy alert webhook delivery failed: {e}");
     }
-    Ok(())
+}
+
+/// Delivers to every enabled, DB-configured alert channel whose
+/// `min_severity` this alert meets. One channel's failure never blocks the
+/// others.
+async fn deliver_to_channels(
+    pool: &PgPool,
+    http: &reqwest::Client,
+    severity: Severity,
+    message: &str,
+) {
+    let channels = match db::list_enabled_alert_channels(pool).await {
+        Ok(c) => c,
+        Err(e) => {
+            tracing::warn!("failed to load alert channels: {e}");
+            return;
+        }
+    };
+    for channel in channels {
+        let min_severity = Severity::parse(&channel.min_severity).unwrap_or(Severity::Warning);
+        if severity < min_severity {
+            continue;
+        }
+        let body = payload_for_channel(&channel.kind, severity, message);
+        if let Err(e) = http
+            .post(&channel.url)
+            .json(&body)
+            .send()
+            .await
+            .and_then(|r| r.error_for_status())
+        {
+            tracing::warn!("alert channel '{}' delivery failed: {e}", channel.name);
+        }
+    }
+}
+
+/// Shapes the outbound JSON body per channel kind: Slack/generic incoming
+/// webhooks expect `{"text": ...}`; Discord's expect `{"content": ...}`. An
+/// unrecognized kind falls back to the Slack/generic shape rather than
+/// failing outright — most "generic" webhook receivers (including many
+/// alerting/chat tools) accept that field name too.
+fn payload_for_channel(kind: &str, severity: Severity, message: &str) -> Value {
+    let text = format!("[{}] {}", severity.as_str(), message);
+    match kind {
+        "discord" => json!({ "content": text }),
+        _ => json!({ "text": text }),
+    }
 }
 
 #[cfg(test)]
@@ -158,5 +230,20 @@ mod tests {
             severity_for_whale_multiple(Decimal::from(1), Decimal::ZERO),
             Severity::Info
         );
+    }
+
+    #[test]
+    fn discord_payload_uses_content_field() {
+        let body = payload_for_channel("discord", Severity::Critical, "test message");
+        assert_eq!(body["content"], "[CRITICAL] test message");
+        assert!(body.get("text").is_none());
+    }
+
+    #[test]
+    fn slack_and_generic_payloads_use_text_field() {
+        for kind in ["slack", "generic", "unknown-kind"] {
+            let body = payload_for_channel(kind, Severity::Warning, "hi");
+            assert_eq!(body["text"], "[WARNING] hi");
+        }
     }
 }

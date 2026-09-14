@@ -129,6 +129,38 @@ pub struct AlertRow {
     pub details: serde_json::Value,
 }
 
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+pub struct AlertChannelRow {
+    pub id: i64,
+    pub name: String,
+    pub kind: String,
+    pub url: String,
+    pub min_severity: String,
+    pub enabled: bool,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+pub struct AlertRuleRow {
+    pub id: i64,
+    pub name: String,
+    pub rule_type: String,
+    pub asset_code: Option<String>,
+    pub asset_issuer: Option<String>,
+    pub threshold: Decimal,
+    pub enabled: bool,
+    pub created_at: DateTime<Utc>,
+}
+
+#[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]
+pub struct WatchlistItemRow {
+    pub id: i64,
+    pub item_type: String,
+    pub item_key: String,
+    pub label: String,
+    pub created_at: DateTime<Utc>,
+}
+
 #[derive(Debug, Serialize, Deserialize)]
 pub struct PoolTrend {
     pub pool_id: String,

@@ -117,6 +117,58 @@ export interface PoolTrend {
   shares_change_pct: string | null;
 }
 
+export type AlertChannelKind = "slack" | "discord" | "generic";
+
+export interface AlertChannel {
+  id: number;
+  name: string;
+  kind: AlertChannelKind;
+  url: string;
+  min_severity: string;
+  enabled: boolean;
+  created_at: string;
+}
+
+export type AlertRuleType = "whale_threshold" | "ltv_band";
+
+export interface AlertRule {
+  id: number;
+  name: string;
+  rule_type: AlertRuleType;
+  asset_code: string | null;
+  asset_issuer: string | null;
+  threshold: string;
+  enabled: boolean;
+  created_at: string;
+}
+
+export type WatchlistItemType = "pool" | "token" | "lending_position";
+
+export interface WatchlistItem {
+  id: number;
+  item_type: WatchlistItemType;
+  item_key: string;
+  label: string;
+  created_at: string;
+}
+
+async function send<T>(method: string, path: string, body?: unknown): Promise<T> {
+  const res = await fetch(`${BASE_URL}${path}`, {
+    method,
+    headers: body === undefined ? undefined : { "Content-Type": "application/json" },
+    body: body === undefined ? undefined : JSON.stringify(body),
+  });
+  if (!res.ok) {
+    const text = await res.text();
+    throw new ApiError(`${res.status} ${res.statusText}: ${text}`);
+  }
+  if (res.status === 204) return undefined as T;
+  return res.json() as Promise<T>;
+}
+
+/** Base URL for a raw EventSource connection — see `live.ts`. */
+export const EVENTS_URL = `${BASE_URL}/events`;
+
 export const api = {
   tvl: (hours = 24) => get<TvlPoint[]>(`/tvl?hours=${hours}`),
   pools: (limit = 2000, offset = 0) =>
@@ -134,4 +186,32 @@ export const api = {
     get<WhaleTransactionRow[]>(`/transactions/whales?min_amount=${minAmount}&limit=${limit}`),
   liquidations: () => get<LiquidationsResponse>("/liquidations"),
   alerts: (limit = 100) => get<AlertRow[]>(`/alerts?limit=${limit}`),
+
+  alertChannels: () => get<AlertChannel[]>("/alert-channels"),
+  createAlertChannel: (body: {
+    name: string;
+    kind: AlertChannelKind;
+    url: string;
+    min_severity: string;
+    enabled: boolean;
+  }) => send<AlertChannel>("POST", "/alert-channels", body),
+  deleteAlertChannel: (id: number) => send<void>("DELETE", `/alert-channels/${id}`),
+
+  alertRules: () => get<AlertRule[]>("/alert-rules"),
+  createAlertRule: (body: {
+    name: string;
+    rule_type: AlertRuleType;
+    asset_code?: string | null;
+    asset_issuer?: string | null;
+    threshold: string;
+    enabled: boolean;
+  }) => send<AlertRule>("POST", "/alert-rules", body),
+  updateAlertRule: (id: number, body: { threshold: string; enabled: boolean }) =>
+    send<AlertRule>("PATCH", `/alert-rules/${id}`, body),
+  deleteAlertRule: (id: number) => send<void>("DELETE", `/alert-rules/${id}`),
+
+  watchlist: () => get<WatchlistItem[]>("/watchlist"),
+  addToWatchlist: (body: { item_type: WatchlistItemType; item_key: string; label: string }) =>
+    send<WatchlistItem>("POST", "/watchlist", body),
+  removeFromWatchlist: (id: number) => send<void>("DELETE", `/watchlist/${id}`),
 };

@@ -100,3 +100,53 @@ pub async fn metrics_handler(State(state): State<AppState>) -> impl IntoResponse
         state.metrics.render(),
     )
 }
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    #[test]
+    fn new_metrics_renders_empty() {
+        let m = Metrics::new();
+        assert_eq!(m.render(), "\
+# HELP lumina_http_requests_total Total HTTP requests by route and status class.\n\
+# TYPE lumina_http_requests_total counter\n\
+# HELP lumina_http_request_duration_ms_total Cumulative request handling time in milliseconds, by route.\n\
+# TYPE lumina_http_request_duration_ms_total counter\n");
+    }
+
+    #[test]
+    fn record_buckets_by_status_class() {
+        let m = Metrics::new();
+        m.record("/pools", 200, 10);
+        m.record("/pools", 201, 5);
+        m.record("/pools", 404, 3);
+        m.record("/pools", 500, 7);
+        m.record("/pools", 101, 1); // "other" bucket
+
+        let out = m.render();
+        assert!(out.contains(r#"lumina_http_requests_total{route="/pools",status="2xx"} 2"#));
+        assert!(out.contains(r#"lumina_http_requests_total{route="/pools",status="4xx"} 1"#));
+        assert!(out.contains(r#"lumina_http_requests_total{route="/pools",status="5xx"} 1"#));
+        assert!(out.contains(r#"lumina_http_requests_total{route="/pools",status="other"} 1"#));
+    }
+
+    #[test]
+    fn record_accumulates_latency_per_route() {
+        let m = Metrics::new();
+        m.record("/tokens", 200, 10);
+        m.record("/tokens", 200, 15);
+        let out = m.render();
+        assert!(out.contains(r#"lumina_http_request_duration_ms_total{route="/tokens"} 25"#));
+    }
+
+    #[test]
+    fn distinct_routes_tracked_independently() {
+        let m = Metrics::new();
+        m.record("/a", 200, 1);
+        m.record("/b", 404, 2);
+        let out = m.render();
+        assert!(out.contains(r#"route="/a",status="2xx"} 1"#));
+        assert!(out.contains(r#"route="/b",status="4xx"} 1"#));
+    }
+}
