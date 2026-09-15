@@ -27,23 +27,25 @@ pub async fn insert_alert(
 }
 
 /// Lists recent alerts, optionally narrowed to one `kind` (e.g.
-/// `liquidity_drop`) and/or one `pool_id` — matched against
-/// `details->>'pool_id'`, present on pool-scoped alert kinds
-/// (`liquidity_drop`) so a pool's detail page can show only alerts about
-/// itself instead of the global feed. Either filter is skipped (matches
-/// everything) when `None`.
+/// `liquidity_drop`), one `pool_id` — matched against `details->>'pool_id'`,
+/// present on pool-scoped alert kinds (`liquidity_drop`) so a pool's detail
+/// page can show only alerts about itself instead of the global feed — and,
+/// when `unacknowledged_only` is set, alerts that haven't been acked yet.
+/// Every filter is skipped (matches everything) when left at its default.
 pub async fn list_alerts(
     pool: &sqlx::PgPool,
     limit: i64,
     kind: Option<&str>,
     pool_id: Option<&str>,
+    unacknowledged_only: bool,
 ) -> anyhow::Result<Vec<AlertRow>> {
     let rows = sqlx::query_as::<_, AlertRow>(
         r#"
-        SELECT time, kind, severity, message, details
+        SELECT id, time, kind, severity, message, details, acknowledged_at
         FROM alerts
         WHERE ($2::text IS NULL OR kind = $2)
           AND ($3::text IS NULL OR details ->> 'pool_id' = $3)
+          AND (NOT $4 OR acknowledged_at IS NULL)
         ORDER BY time DESC
         LIMIT $1
         "#,
@@ -51,9 +53,27 @@ pub async fn list_alerts(
     .bind(limit)
     .bind(kind)
     .bind(pool_id)
+    .bind(unacknowledged_only)
     .fetch_all(pool)
     .await?;
     Ok(rows)
+}
+
+/// Marks one alert acknowledged (idempotent: re-acking just keeps the
+/// original `acknowledged_at`). Returns `false` when `id` doesn't exist, so
+/// the handler can 404 instead of reporting success for nothing.
+pub async fn acknowledge_alert(pool: &sqlx::PgPool, id: i64) -> anyhow::Result<bool> {
+    let result = sqlx::query(
+        r#"
+        UPDATE alerts
+        SET acknowledged_at = COALESCE(acknowledged_at, now())
+        WHERE id = $1
+        "#,
+    )
+    .bind(id)
+    .execute(pool)
+    .await?;
+    Ok(result.rows_affected() > 0)
 }
 
 // ---- live events (Postgres NOTIFY, see `events`) ----

@@ -118,11 +118,13 @@ export interface TokenSnapshotRow {
 }
 
 export interface AlertRow {
+  id: number;
   time: string;
   kind: string;
   severity: "INFO" | "WARNING" | "CRITICAL";
   message: string;
   details: Record<string, unknown>;
+  acknowledged_at: string | null;
 }
 
 export interface PoolTrend {
@@ -225,12 +227,14 @@ export const api = {
         (account ? `&account=${encodeURIComponent(account)}` : ""),
     ),
   liquidations: () => get<LiquidationsResponse>("/liquidations"),
-  alerts: (limit = 100, opts?: { kind?: string; poolId?: string }) =>
+  alerts: (limit = 100, opts?: { kind?: string; poolId?: string; unacknowledged?: boolean }) =>
     get<AlertRow[]>(
       `/alerts?limit=${limit}` +
         (opts?.kind ? `&kind=${encodeURIComponent(opts.kind)}` : "") +
-        (opts?.poolId ? `&pool_id=${encodeURIComponent(opts.poolId)}` : ""),
+        (opts?.poolId ? `&pool_id=${encodeURIComponent(opts.poolId)}` : "") +
+        (opts?.unacknowledged ? `&unacknowledged=true` : ""),
     ),
+  acknowledgeAlert: (id: number) => send<void>("PATCH", `/alerts/${id}/ack`),
   search: (q: string, limit = 8) =>
     get<SearchResult[]>(`/search?q=${encodeURIComponent(q)}&limit=${limit}`),
 

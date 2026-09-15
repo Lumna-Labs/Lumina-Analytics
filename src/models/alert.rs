@@ -4,11 +4,13 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Debug, Serialize, sqlx::FromRow)]
 pub struct AlertRow {
+    pub id: i64,
     pub time: DateTime<Utc>,
     pub kind: String,
     pub severity: String,
     pub message: String,
     pub details: serde_json::Value,
+    pub acknowledged_at: Option<DateTime<Utc>>,
 }
 
 #[derive(Debug, Clone, Serialize, Deserialize, sqlx::FromRow)]

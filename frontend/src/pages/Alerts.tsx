@@ -17,19 +17,36 @@ const BADGE_CLASS: Record<AlertRow["severity"], string> = {
 export function Alerts() {
   const alerts = usePolled(() => api.alerts(200), [], 20_000);
   const [severity, setSeverity] = useState<string>("ALL");
+  const [unackedOnly, setUnackedOnly] = useState(false);
+  const [acking, setAcking] = useState<number | null>(null);
 
   useLiveEvents((event) => {
     if (event.type === "alert") alerts.refetch();
   });
 
   const filtered = useMemo(() => {
-    const rows = alerts.data ?? [];
-    return severity === "ALL" ? rows : rows.filter((a) => a.severity === severity);
-  }, [alerts.data, severity]);
+    let rows = alerts.data ?? [];
+    if (severity !== "ALL") rows = rows.filter((a) => a.severity === severity);
+    if (unackedOnly) rows = rows.filter((a) => !a.acknowledged_at);
+    return rows;
+  }, [alerts.data, severity, unackedOnly]);
 
   function exportCsv() {
     const csv = toCsv(filtered, ["time", "severity", "kind", "message"]);
     downloadCsv("lumina-alerts.csv", csv);
+  }
+
+  async function acknowledge(id: number) {
+    setAcking(id);
+    try {
+      await api.acknowledgeAlert(id);
+      await alerts.refetch();
+    } catch {
+      // Best-effort UI action: a failed ack (e.g. missing/wrong admin key)
+      // just leaves the alert unacknowledged — nothing else depends on it.
+    } finally {
+      setAcking(null);
+    }
   }
 
   return (
@@ -55,6 +72,14 @@ export function Alerts() {
             </option>
           ))}
         </select>
+        <label style={{ display: "flex", alignItems: "center", gap: 6, fontSize: 12.5 }}>
+          <input
+            type="checkbox"
+            checked={unackedOnly}
+            onChange={(e) => setUnackedOnly(e.target.checked)}
+          />
+          Unacknowledged only
+        </label>
         <span style={{ color: "var(--muted)", fontSize: 12.5 }}>
           {filtered.length} of {alerts.data?.length ?? 0} alerts
         </span>
@@ -82,22 +107,39 @@ export function Alerts() {
                 <th>Severity</th>
                 <th>Kind</th>
                 <th>Message</th>
+                <th></th>
               </tr>
             </thead>
             <tbody>
               {filtered.map((a) => (
-                <tr key={`${a.time}:${a.message}`}>
+                <tr key={a.id}>
                   <td title={fmtTime(a.time)}>{fmtRelative(a.time)}</td>
                   <td>
                     <span className={BADGE_CLASS[a.severity]}>{a.severity}</span>
                   </td>
                   <td>{a.kind}</td>
                   <td>{a.message}</td>
+                  <td>
+                    {a.acknowledged_at ? (
+                      <span title={fmtTime(a.acknowledged_at)} style={{ color: "var(--muted)", fontSize: 12 }}>
+                        Acked
+                      </span>
+                    ) : (
+                      <button
+                        type="button"
+                        className="export-btn"
+                        onClick={() => acknowledge(a.id)}
+                        disabled={acking === a.id}
+                      >
+                        {acking === a.id ? "Acking…" : "Ack"}
+                      </button>
+                    )}
+                  </td>
                 </tr>
               ))}
               {filtered.length === 0 && (
                 <tr>
-                  <td colSpan={4}>No alerts at this severity.</td>
+                  <td colSpan={5}>No alerts at this severity.</td>
                 </tr>
               )}
             </tbody>

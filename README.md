@@ -135,7 +135,7 @@ All variables live in `.env` (see `.env.example`); every one has a sane default 
 | `LIQUIDITY_DROP_THRESHOLD_PCT` | `30` | Minimum percent drop in a pool's `total_shares` between consecutive ingest cycles that triggers a `liquidity_drop` alert |
 | `RATE_LIMIT_RPS` | `0` (disabled) | Per-client-IP requests/sec on the API; `0` disables rate limiting |
 | `RATE_LIMIT_BURST` | `40` | Token-bucket burst capacity when rate limiting is enabled |
-| `ADMIN_API_KEY` | unset | Shared secret required as an `X-Admin-Key` header to write alert rules/channels or watchlist items; unset = no gate |
+| `ADMIN_API_KEY` | unset | Shared secret required as an `X-Admin-Key` header to write alert rules/channels/acknowledgements or watchlist items; unset = no gate |
 
 ## API
 
@@ -154,7 +154,8 @@ loss.
 | `GET /tokens/:asset_code/:asset_issuer/history?hours=24` | One asset's snapshot history |
 | `GET /transactions/whales?min_amount=10000&limit=100&account=G...` | Large payments, enriched with a USD estimate where known; `account` restricts to payments where that address was the source or destination (powers the per-account Activity page) |
 | `GET /liquidations` | Blend lending positions + risk-bucket summary (empty until `BLEND_POOL_IDS` is configured; `ltv`/`health_factor` stay `null` until `BLEND_ASSET_PRICES_USD` is too). Risk buckets honor any enabled `ltv_band` alert rules (see below), falling back to 70/85/95% LTV. |
-| `GET /alerts?limit=100&kind=liquidity_drop&pool_id=...` | Recently detected alert-worthy events (outsized whale payments, lending positions crossing into a higher risk band, pool liquidity drops); `kind` and `pool_id` (matched against `details.pool_id`) each optionally narrow the results — powers the Pool Detail page's "Recent Alerts" panel |
+| `GET /alerts?limit=100&kind=liquidity_drop&pool_id=...&unacknowledged=true` | Recently detected alert-worthy events (outsized whale payments, lending positions crossing into a higher risk band, pool liquidity drops); `kind`, `pool_id` (matched against `details.pool_id`), and `unacknowledged` each optionally narrow the results — powers the Pool Detail page's "Recent Alerts" panel |
+| `PATCH /alerts/:id/ack` | Marks one alert acknowledged (idempotent; admin-key gated — see "Operational hardening") |
 | `GET /alert-channels` / `POST /alert-channels` / `DELETE /alert-channels/:id` | Manage named Slack/Discord/generic-webhook alert delivery channels (see "Alert rules & channels") |
 | `GET /alert-rules` / `POST /alert-rules` / `PATCH /alert-rules/:id` / `DELETE /alert-rules/:id` | Manage per-asset whale-threshold and LTV-band overrides (see "Alert rules & channels") |
 | `GET /watchlist` / `POST /watchlist` / `DELETE /watchlist/:id` | Pin/unpin pools, tokens, or lending positions for the Watchlist page |
@@ -175,7 +176,7 @@ loss.
 | `/whales` | Large payments network-wide, sortable, CSV export; accounts link to Account Activity |
 | `/accounts/:address` | One account's full recorded whale-payment history (sent + received), CSV export |
 | `/liquidations` | Blend lending positions bucketed by risk band, pinnable, CSV export |
-| `/alerts` | Recorded alerts, filterable by severity, CSV export; refreshes on both a timer and live events |
+| `/alerts` | Recorded alerts, filterable by severity and unacknowledged-only, acknowledgeable individually, CSV export; refreshes on both a timer and live events |
 | `/alerts/settings` | Manage alert rules (per-asset whale thresholds, LTV-band overrides) and delivery channels |
 | `/watchlist` | Pinned pools/tokens/lending positions in one place |
 
@@ -202,6 +203,11 @@ table (visible on the dashboard's Alerts page), independent of any external conf
 Set `ALERT_WEBHOOK_URL` to also push `WARNING`+ alerts (configurable via `ALERT_MIN_SEVERITY`) to a
 Slack-compatible incoming webhook. Webhook delivery is best-effort: a failure is logged and never
 affects ingestion or the recorded alert.
+
+Every alert can be individually acknowledged (`PATCH /alerts/:id/ack`, or the "Ack" button on the
+Alerts page) so a resolved or already-actioned event stops cluttering the "Unacknowledged only"
+view. Acknowledging is purely a dashboard-side annotation — it doesn't affect webhook delivery,
+which has already happened by the time an alert is visible to ack.
 
 ## Alert rules & channels
 
@@ -248,7 +254,8 @@ available live.
 - **Rate limiting**: set `RATE_LIMIT_RPS` (and optionally `RATE_LIMIT_BURST`) to cap requests per
   client IP with a simple in-process token bucket. Disabled (`0`) by default.
 - **Admin key**: set `ADMIN_API_KEY` to require an `X-Admin-Key` header on every write to alert
-  rules/channels or the watchlist (their `GET` endpoints stay open). Unset by default — this
+  rules/channels, the watchlist, or acknowledging an alert (their `GET` endpoints stay open). Unset
+  by default — this
   project has no per-user auth, so the key is a single shared secret, not an account system. The
   dashboard's Alerts Settings page has a field to store it in the browser (`localStorage`) once so
   its own writes keep working.

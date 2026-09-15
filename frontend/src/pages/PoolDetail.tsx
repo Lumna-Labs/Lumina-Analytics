@@ -122,7 +122,7 @@ export function PoolDetail() {
           <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
             {(alerts.data ?? []).map((a) => (
               <li
-                key={`${a.time}:${a.message}`}
+                key={a.id}
                 style={{
                   display: "flex",
                   gap: 10,
