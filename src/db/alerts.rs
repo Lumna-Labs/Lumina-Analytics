@@ -26,16 +26,31 @@ pub async fn insert_alert(
     Ok(())
 }
 
-pub async fn list_alerts(pool: &sqlx::PgPool, limit: i64) -> anyhow::Result<Vec<AlertRow>> {
+/// Lists recent alerts, optionally narrowed to one `kind` (e.g.
+/// `liquidity_drop`) and/or one `pool_id` — matched against
+/// `details->>'pool_id'`, present on pool-scoped alert kinds
+/// (`liquidity_drop`) so a pool's detail page can show only alerts about
+/// itself instead of the global feed. Either filter is skipped (matches
+/// everything) when `None`.
+pub async fn list_alerts(
+    pool: &sqlx::PgPool,
+    limit: i64,
+    kind: Option<&str>,
+    pool_id: Option<&str>,
+) -> anyhow::Result<Vec<AlertRow>> {
     let rows = sqlx::query_as::<_, AlertRow>(
         r#"
         SELECT time, kind, severity, message, details
         FROM alerts
+        WHERE ($2::text IS NULL OR kind = $2)
+          AND ($3::text IS NULL OR details ->> 'pool_id' = $3)
         ORDER BY time DESC
         LIMIT $1
         "#,
     )
     .bind(limit)
+    .bind(kind)
+    .bind(pool_id)
     .fetch_all(pool)
     .await?;
     Ok(rows)

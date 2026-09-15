@@ -225,7 +225,12 @@ export const api = {
         (account ? `&account=${encodeURIComponent(account)}` : ""),
     ),
   liquidations: () => get<LiquidationsResponse>("/liquidations"),
-  alerts: (limit = 100) => get<AlertRow[]>(`/alerts?limit=${limit}`),
+  alerts: (limit = 100, opts?: { kind?: string; poolId?: string }) =>
+    get<AlertRow[]>(
+      `/alerts?limit=${limit}` +
+        (opts?.kind ? `&kind=${encodeURIComponent(opts.kind)}` : "") +
+        (opts?.poolId ? `&pool_id=${encodeURIComponent(opts.poolId)}` : ""),
+    ),
   search: (q: string, limit = 8) =>
     get<SearchResult[]>(`/search?q=${encodeURIComponent(q)}&limit=${limit}`),
 

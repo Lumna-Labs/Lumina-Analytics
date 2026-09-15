@@ -1,11 +1,18 @@
 import { useState } from "react";
 import { Link, useParams } from "react-router-dom";
 import { api } from "../api";
+import type { AlertRow } from "../api";
 import { usePolled } from "../hooks";
 import { StatTile } from "../components/StatTile";
 import { TimeSeriesChart } from "../components/TimeSeriesChart";
 import { ErrorState, LoadingState } from "../components/States";
-import { assetLabel, fmtCompact, pairLabel } from "../format";
+import { assetLabel, fmtCompact, fmtRelative, fmtTime, pairLabel } from "../format";
+
+const ALERT_BADGE_CLASS: Record<AlertRow["severity"], string> = {
+  CRITICAL: "badge badge-critical",
+  WARNING: "badge badge-warning",
+  INFO: "badge badge-info",
+};
 
 const RANGES = [
   { label: "24h", hours: 24 },
@@ -19,6 +26,7 @@ export function PoolDetail() {
 
   const pools = usePolled(() => api.pools(), []);
   const history = usePolled(() => api.poolHistory(poolId, hours), [poolId, hours]);
+  const alerts = usePolled(() => api.alerts(20, { poolId }), [poolId], 20_000);
 
   const meta = pools.data?.find((p) => p.pool_id === poolId);
 
@@ -100,6 +108,38 @@ export function PoolDetail() {
             <LoadingState label="—" />
           )}
         </div>
+      </div>
+
+      <div className="card" style={{ marginTop: 14 }}>
+        <p className="card-title">Recent Alerts</p>
+        {alerts.loading && !alerts.data ? (
+          <LoadingState />
+        ) : (alerts.data ?? []).length === 0 ? (
+          <p style={{ color: "var(--muted)", fontSize: 13 }}>
+            No liquidity-drop alerts on record for this pool.
+          </p>
+        ) : (
+          <ul style={{ listStyle: "none", margin: 0, padding: 0 }}>
+            {(alerts.data ?? []).map((a) => (
+              <li
+                key={`${a.time}:${a.message}`}
+                style={{
+                  display: "flex",
+                  gap: 10,
+                  alignItems: "baseline",
+                  padding: "6px 0",
+                  borderBottom: "1px solid var(--border)",
+                }}
+              >
+                <span className={ALERT_BADGE_CLASS[a.severity]}>{a.severity}</span>
+                <span style={{ flex: 1 }}>{a.message}</span>
+                <span title={fmtTime(a.time)} style={{ color: "var(--muted)", fontSize: 12 }}>
+                  {fmtRelative(a.time)}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
       </div>
     </div>
   );

@@ -154,7 +154,7 @@ loss.
 | `GET /tokens/:asset_code/:asset_issuer/history?hours=24` | One asset's snapshot history |
 | `GET /transactions/whales?min_amount=10000&limit=100&account=G...` | Large payments, enriched with a USD estimate where known; `account` restricts to payments where that address was the source or destination (powers the per-account Activity page) |
 | `GET /liquidations` | Blend lending positions + risk-bucket summary (empty until `BLEND_POOL_IDS` is configured; `ltv`/`health_factor` stay `null` until `BLEND_ASSET_PRICES_USD` is too). Risk buckets honor any enabled `ltv_band` alert rules (see below), falling back to 70/85/95% LTV. |
-| `GET /alerts?limit=100` | Recently detected alert-worthy events (outsized whale payments, lending positions crossing into a higher risk band) |
+| `GET /alerts?limit=100&kind=liquidity_drop&pool_id=...` | Recently detected alert-worthy events (outsized whale payments, lending positions crossing into a higher risk band, pool liquidity drops); `kind` and `pool_id` (matched against `details.pool_id`) each optionally narrow the results — powers the Pool Detail page's "Recent Alerts" panel |
 | `GET /alert-channels` / `POST /alert-channels` / `DELETE /alert-channels/:id` | Manage named Slack/Discord/generic-webhook alert delivery channels (see "Alert rules & channels") |
 | `GET /alert-rules` / `POST /alert-rules` / `PATCH /alert-rules/:id` / `DELETE /alert-rules/:id` | Manage per-asset whale-threshold and LTV-band overrides (see "Alert rules & channels") |
 | `GET /watchlist` / `POST /watchlist` / `DELETE /watchlist/:id` | Pin/unpin pools, tokens, or lending positions for the Watchlist page |
@@ -169,7 +169,7 @@ loss.
 |---|---|
 | `/` | TVL overview: locked-liquidity chart, top pools, trending pools, recent whale payments |
 | `/pools` | All tracked pools, sortable/searchable/pinnable, CSV export |
-| `/pools/:poolId` | One pool's reserve/share history |
+| `/pools/:poolId` | One pool's reserve/share history, plus its own recent liquidity-drop alerts |
 | `/tokens` | All tracked issued assets, sortable/searchable/pinnable, CSV export |
 | `/tokens/:assetCode/:assetIssuer` | One asset's supply/holder history |
 | `/whales` | Large payments network-wide, sortable, CSV export; accounts link to Account Activity |

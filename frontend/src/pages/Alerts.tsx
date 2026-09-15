@@ -37,9 +37,10 @@ export function Alerts() {
       <div className="page-header">
         <h1 className="page-title">Alerts</h1>
         <p className="page-subtitle">
-          Outsized whale payments and lending positions crossing into a higher liquidation-risk
-          band, detected each ingest cycle. Always recorded here regardless of whether
-          ALERT_WEBHOOK_URL is configured. Refreshes every 20s, plus instantly on a live event.
+          Outsized whale payments, lending positions crossing into a higher liquidation-risk band,
+          and sudden pool liquidity drops, detected each ingest cycle. Always recorded here
+          regardless of whether ALERT_WEBHOOK_URL is configured. Refreshes every 20s, plus
+          instantly on a live event.
         </p>
       </div>
 
@@ -70,7 +71,7 @@ export function Alerts() {
       ) : (alerts.data ?? []).length === 0 ? (
         <EmptyState
           title="No alerts yet"
-          body="Alerts appear here as the ingester detects outsized whale payments or lending positions crossing into HIGH/CRITICAL liquidation risk. Nothing to show until the next qualifying event."
+          body="Alerts appear here as the ingester detects outsized whale payments, lending positions crossing into HIGH/CRITICAL liquidation risk, or a pool's liquidity dropping suddenly. Nothing to show until the next qualifying event."
         />
       ) : (
         <div className="table-wrap">
