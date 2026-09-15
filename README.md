@@ -48,6 +48,25 @@ Redis and a USD price feed are both optional and fail open: if either is unreach
 the API and ingester keep working from Postgres alone (Redis absence just means every request hits
 Postgres directly; no price feed means USD fields are `null`, never fabricated).
 
+### Code layout
+
+`src/db/`, `src/models/`, and `src/api/routes/` are each split into one file per domain (pools,
+tokens, whale payments, lending, alerting, watchlist, search) instead of one growing flat file, so
+adding a feature usually means adding or extending one small file rather than editing a shared one.
+Each `mod.rs` re-exports its submodules flat, so call sites keep writing `db::list_pools_with_latest`
+or `crate::models::PoolTrend` regardless of which submodule actually defines it — only
+`api::routes::router()` needs to know the submodule names, to wire handlers to paths.
+
+```
+src/
+├── db/            per-domain Postgres access (pools.rs, tokens.rs, whales.rs, lending.rs, ...)
+├── models/        per-domain wire/row types, mirroring db/'s layout
+├── api/routes/     per-domain HTTP handlers, mirroring db/'s layout; mod.rs builds the router
+├── bin/           the two binaries (ingest.rs, api.rs)
+└── *.rs           cross-cutting concerns used by both binaries (alerts, cache, config, events,
+                   horizon, logic, metrics, pricing, ratelimit, soroban)
+```
+
 ## Quickstart (Docker)
 
 ```bash
