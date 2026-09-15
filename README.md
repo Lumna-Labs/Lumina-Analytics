@@ -134,6 +134,7 @@ All variables live in `.env` (see `.env.example`); every one has a sane default 
 | `ALERT_MIN_SEVERITY` | `WARNING` | Minimum severity (`INFO`/`WARNING`/`CRITICAL`) that triggers the webhook |
 | `RATE_LIMIT_RPS` | `0` (disabled) | Per-client-IP requests/sec on the API; `0` disables rate limiting |
 | `RATE_LIMIT_BURST` | `40` | Token-bucket burst capacity when rate limiting is enabled |
+| `ADMIN_API_KEY` | unset | Shared secret required as an `X-Admin-Key` header to write alert rules/channels or watchlist items; unset = no gate |
 
 ## API
 
@@ -240,6 +241,11 @@ available live.
 
 - **Rate limiting**: set `RATE_LIMIT_RPS` (and optionally `RATE_LIMIT_BURST`) to cap requests per
   client IP with a simple in-process token bucket. Disabled (`0`) by default.
+- **Admin key**: set `ADMIN_API_KEY` to require an `X-Admin-Key` header on every write to alert
+  rules/channels or the watchlist (their `GET` endpoints stay open). Unset by default — this
+  project has no per-user auth, so the key is a single shared secret, not an account system. The
+  dashboard's Alerts Settings page has a field to store it in the browser (`localStorage`) once so
+  its own writes keep working.
 - **Metrics**: `GET /metrics` exposes per-route request counts and cumulative latency in
   Prometheus text format — point a Prometheus scrape config at it.
 - **Retention**: `pool_snapshots` and `token_snapshots` (the two tables that grow every poll cycle

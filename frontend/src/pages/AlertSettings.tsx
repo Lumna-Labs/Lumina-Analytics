@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { Link } from "react-router-dom";
-import { api } from "../api";
+import { api, getAdminKey, setAdminKey } from "../api";
 import type { AlertChannelKind, AlertRuleType } from "../api";
 import { usePolled } from "../hooks";
 import { ErrorState, LoadingState } from "../components/States";
@@ -22,6 +22,8 @@ export function AlertSettings() {
         </p>
       </div>
 
+      <AdminKeyPanel />
+
       <h2 className="section-title">Delivery channels</h2>
       {channels.error && <ErrorState message={channels.error} />}
       {channels.loading && !channels.data ? (
@@ -38,6 +40,42 @@ export function AlertSettings() {
         <RulesPanel rules={rules.data ?? []} onChanged={rules.refetch} />
       )}
     </div>
+  );
+}
+
+/** Only matters when the API is deployed with ADMIN_API_KEY set (see the
+ * README's "Admin key" section) — stores the shared secret in this browser
+ * so this page's own writes (and pinning elsewhere in the app) keep working. */
+function AdminKeyPanel() {
+  const [key, setKey] = useState(() => getAdminKey());
+  const [saved, setSaved] = useState(false);
+
+  function save(e: React.FormEvent) {
+    e.preventDefault();
+    setAdminKey(key.trim());
+    setSaved(true);
+    setTimeout(() => setSaved(false), 2000);
+  }
+
+  return (
+    <details style={{ marginBottom: 18 }}>
+      <summary style={{ cursor: "pointer", fontSize: 13, color: "var(--muted)" }}>
+        Admin key (only needed if this deployment sets ADMIN_API_KEY)
+      </summary>
+      <form className="toolbar" onSubmit={save} style={{ marginTop: 10 }}>
+        <input
+          type="password"
+          placeholder="X-Admin-Key value"
+          value={key}
+          onChange={(e) => setKey(e.target.value)}
+          style={{ minWidth: 240 }}
+        />
+        <button type="submit" className="export-btn">
+          Save
+        </button>
+        {saved && <span style={{ fontSize: 12.5 }}>Saved.</span>}
+      </form>
+    </details>
   );
 }
 

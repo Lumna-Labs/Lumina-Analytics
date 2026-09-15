@@ -26,6 +26,9 @@ async fn main() -> anyhow::Result<()> {
             config.rate_limit_burst
         );
     }
+    if config.admin_api_key.is_some() {
+        tracing::info!("admin key required for alert-rule/channel and watchlist writes");
+    }
     let event_bus = events::new_bus();
     tokio::spawn(events::listen_and_forward(
         config.database_url.clone(),
@@ -41,6 +44,7 @@ async fn main() -> anyhow::Result<()> {
             config.rate_limit_burst,
         )),
         events: event_bus,
+        admin_api_key: config.admin_api_key.clone(),
     };
     let app = build_router(state);
 

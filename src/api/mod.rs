@@ -17,6 +17,7 @@ pub struct AppState {
     pub metrics: Arc<Metrics>,
     pub rate_limiter: Arc<RateLimiter>,
     pub events: EventBus,
+    pub admin_api_key: Option<String>,
 }
 
 pub fn build_router(state: AppState) -> Router {

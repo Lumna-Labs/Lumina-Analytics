@@ -2,12 +2,13 @@
 //! channels and threshold/band override rules (see `db::alert_config`).
 
 use axum::extract::{Path, State};
-use axum::http::StatusCode;
+use axum::http::{HeaderMap, StatusCode};
 use axum::response::{IntoResponse, Json};
 use rust_decimal::Decimal;
 use serde::Deserialize;
 
 use crate::api::AppState;
+use crate::auth;
 use crate::db;
 
 use super::{bad_request, err};
@@ -42,8 +43,12 @@ pub async fn list_alert_channels(State(state): State<AppState>) -> impl IntoResp
 
 pub async fn create_alert_channel(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(body): Json<NewAlertChannel>,
 ) -> impl IntoResponse {
+    if let Some(resp) = auth::guard(&state, &headers) {
+        return resp;
+    }
     if !["slack", "discord", "generic"].contains(&body.kind.as_str()) {
         return bad_request("kind must be one of: slack, discord, generic");
     }
@@ -67,8 +72,12 @@ pub async fn create_alert_channel(
 
 pub async fn delete_alert_channel(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Path(id): Path<i64>,
 ) -> impl IntoResponse {
+    if let Some(resp) = auth::guard(&state, &headers) {
+        return resp;
+    }
     match db::delete_alert_channel(&state.db, id).await {
         Ok(true) => StatusCode::NO_CONTENT.into_response(),
         Ok(false) => StatusCode::NOT_FOUND.into_response(),
@@ -104,8 +113,12 @@ pub async fn list_alert_rules(State(state): State<AppState>) -> impl IntoRespons
 
 pub async fn create_alert_rule(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Json(body): Json<NewAlertRule>,
 ) -> impl IntoResponse {
+    if let Some(resp) = auth::guard(&state, &headers) {
+        return resp;
+    }
     match body.rule_type.as_str() {
         "whale_threshold" => {
             if body.asset_code.is_none() {
@@ -137,9 +150,13 @@ pub async fn create_alert_rule(
 
 pub async fn update_alert_rule(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Path(id): Path<i64>,
     Json(body): Json<UpdateAlertRule>,
 ) -> impl IntoResponse {
+    if let Some(resp) = auth::guard(&state, &headers) {
+        return resp;
+    }
     match db::update_alert_rule(&state.db, id, body.threshold, body.enabled).await {
         Ok(Some(row)) => Json(row).into_response(),
         Ok(None) => StatusCode::NOT_FOUND.into_response(),
@@ -149,8 +166,12 @@ pub async fn update_alert_rule(
 
 pub async fn delete_alert_rule(
     State(state): State<AppState>,
+    headers: HeaderMap,
     Path(id): Path<i64>,
 ) -> impl IntoResponse {
+    if let Some(resp) = auth::guard(&state, &headers) {
+        return resp;
+    }
     match db::delete_alert_rule(&state.db, id).await {
         Ok(true) => StatusCode::NO_CONTENT.into_response(),
         Ok(false) => StatusCode::NOT_FOUND.into_response(),

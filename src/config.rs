@@ -68,6 +68,13 @@ pub struct Config {
     /// Burst capacity for the same token-bucket (max requests in a short
     /// spike before the per-second rate applies).
     pub rate_limit_burst: u32,
+    /// Optional shared secret that gates the API's mutating endpoints (alert
+    /// rules/channels, watchlist) behind an `X-Admin-Key` header. Unset by
+    /// default so local/dev and single-operator deployments need no extra
+    /// setup — this is a defensive measure for a publicly exposed
+    /// deployment, not a correctness dependency, so it fails open (no key
+    /// configured = no gate) rather than lock an operator out by accident.
+    pub admin_api_key: Option<String>,
 }
 
 impl Config {
@@ -114,6 +121,7 @@ impl Config {
                 .ok()
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(40),
+            admin_api_key: env::var("ADMIN_API_KEY").ok().filter(|s| !s.is_empty()),
         }
     }
 
@@ -213,6 +221,7 @@ mod tests {
             alert_min_severity: "WARNING".to_string(),
             rate_limit_rps: 0,
             rate_limit_burst: 40,
+            admin_api_key: None,
         }
     }
 }

@@ -1,6 +1,28 @@
 const BASE_URL = import.meta.env.VITE_API_BASE_URL ?? "http://localhost:8080";
+const ADMIN_KEY_STORAGE_KEY = "lumina.adminKey";
 
 export class ApiError extends Error {}
+
+// Only relevant when the API is deployed with ADMIN_API_KEY set — see the
+// README's "Admin key" section. Stored per-browser, never sent anywhere but
+// this API, and simply omitted (server treats it as absent) when unset.
+export function getAdminKey(): string {
+  try {
+    return localStorage.getItem(ADMIN_KEY_STORAGE_KEY) ?? "";
+  } catch {
+    return "";
+  }
+}
+
+export function setAdminKey(key: string): void {
+  try {
+    if (key) localStorage.setItem(ADMIN_KEY_STORAGE_KEY, key);
+    else localStorage.removeItem(ADMIN_KEY_STORAGE_KEY);
+  } catch {
+    // Best-effort: a private-browsing/blocked-storage session just falls
+    // back to sending write requests without the header.
+  }
+}
 
 async function get<T>(path: string): Promise<T> {
   const res = await fetch(`${BASE_URL}${path}`);
@@ -163,9 +185,14 @@ export interface WatchlistItem {
 }
 
 async function send<T>(method: string, path: string, body?: unknown): Promise<T> {
+  const headers: Record<string, string> = {};
+  if (body !== undefined) headers["Content-Type"] = "application/json";
+  const adminKey = getAdminKey();
+  if (adminKey) headers["X-Admin-Key"] = adminKey;
+
   const res = await fetch(`${BASE_URL}${path}`, {
     method,
-    headers: body === undefined ? undefined : { "Content-Type": "application/json" },
+    headers: Object.keys(headers).length > 0 ? headers : undefined,
     body: body === undefined ? undefined : JSON.stringify(body),
   });
   if (!res.ok) {
