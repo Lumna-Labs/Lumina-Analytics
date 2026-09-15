@@ -36,6 +36,7 @@ pub fn router(state: AppState) -> Router {
         .route("/health", get(health))
         .route("/metrics", get(metrics::metrics_handler))
         .route("/tvl", get(tvl))
+        .route("/search", get(search))
         .route("/pools", get(pools))
         .route("/pools/:pool_id/history", get(pool_history))
         .route("/pools/trending", get(pools_trending))
@@ -124,6 +125,27 @@ async fn tvl(State(state): State<AppState>, Query(q): Query<RangeQuery>) -> impl
         .await
     {
         Ok(series) => Json(series).into_response(),
+        Err(e) => err(e),
+    }
+}
+
+#[derive(Debug, Deserialize)]
+struct SearchQuery {
+    q: Option<String>,
+    limit: Option<i64>,
+}
+
+/// Global search across pools, tokens, and whale-payment accounts, powering
+/// the sidebar search bar. Not cached (unlike the list endpoints above) —
+/// query strings are effectively unbounded, so caching would mostly just
+/// grow the cache without saving repeat hits.
+async fn search(State(state): State<AppState>, Query(q): Query<SearchQuery>) -> impl IntoResponse {
+    let Some(pattern) = crate::logic::search_like_pattern(q.q.as_deref().unwrap_or("")) else {
+        return Json(Vec::<crate::models::SearchResultRow>::new()).into_response();
+    };
+    let limit = q.limit.unwrap_or(8).clamp(1, 25);
+    match db::search(&state.db, &pattern, limit).await {
+        Ok(rows) => Json(rows).into_response(),
         Err(e) => err(e),
     }
 }

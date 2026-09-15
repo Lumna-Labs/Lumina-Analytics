@@ -8,6 +8,7 @@ import {
   fmtTime,
   fmtUsd,
   pairLabel,
+  searchResultHref,
   truncateMiddle,
 } from "./format";
 
@@ -87,6 +88,24 @@ describe("truncateMiddle", () => {
   it("truncates long strings with an ellipsis in the middle", () => {
     const long = "GABCDEFGHIJKLMNOPQRSTUVWXYZ1234567890";
     expect(truncateMiddle(long)).toBe("GABCDE…567890");
+  });
+});
+
+describe("searchResultHref", () => {
+  it("links a pool result to its detail page", () => {
+    expect(searchResultHref({ result_type: "pool", key: "POOL123" })).toBe("/pools/POOL123");
+  });
+
+  it("splits a token key into code and issuer", () => {
+    expect(searchResultHref({ result_type: "token", key: "USDC:GISSUER" })).toBe(
+      "/tokens/USDC/GISSUER",
+    );
+  });
+
+  it("links an account result to the activity page", () => {
+    expect(searchResultHref({ result_type: "account", key: "GACCOUNT" })).toBe(
+      "/accounts/GACCOUNT",
+    );
   });
 });
 

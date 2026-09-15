@@ -101,6 +101,24 @@ pub fn risk_rank(level: &str) -> u8 {
     }
 }
 
+/// Turns a raw global-search query into an ILIKE substring pattern, escaping
+/// `%`/`_`/`\` so a user typing a literal wildcard character searches for
+/// that character instead of matching everything (paired with `ESCAPE '\'`
+/// on the SQL side — see `db::search`). Returns `None` for a query too short
+/// to search usefully (after trimming), so callers can skip hitting the
+/// database on every keystroke of a one-character input.
+pub fn search_like_pattern(raw: &str) -> Option<String> {
+    let trimmed = raw.trim();
+    if trimmed.len() < 2 {
+        return None;
+    }
+    let escaped = trimmed
+        .replace('\\', "\\\\")
+        .replace('%', "\\%")
+        .replace('_', "\\_");
+    Some(format!("%{escaped}%"))
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -228,5 +246,26 @@ mod tests {
         assert!(risk_rank("CRITICAL") > risk_rank("HIGH"));
         assert!(risk_rank("HIGH") > risk_rank("MEDIUM"));
         assert!(risk_rank("MEDIUM") > risk_rank("LOW"));
+    }
+
+    #[test]
+    fn search_pattern_rejects_short_or_empty_terms() {
+        assert_eq!(search_like_pattern(""), None);
+        assert_eq!(search_like_pattern("  "), None);
+        assert_eq!(search_like_pattern("a"), None);
+    }
+
+    #[test]
+    fn search_pattern_trims_and_wraps() {
+        assert_eq!(search_like_pattern("  USDC  "), Some("%USDC%".to_string()));
+    }
+
+    #[test]
+    fn search_pattern_escapes_wildcards() {
+        assert_eq!(
+            search_like_pattern("50%_off"),
+            Some("%50\\%\\_off%".to_string())
+        );
+        assert_eq!(search_like_pattern("a\\b"), Some("%a\\\\b%".to_string()));
     }
 }

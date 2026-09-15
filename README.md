@@ -125,6 +125,7 @@ loss.
 |---|---|
 | `GET /health` | Readiness check: pings Postgres and returns 503 if unreachable (Redis is optional/fail-open, so it isn't checked here) |
 | `GET /tvl?hours=24` | Hourly native-XLM reserve totals across pools, plus USD when priced |
+| `GET /search?q=usdc&limit=8` | Global search across pools, tokens, and whale-payment accounts; `q` must be 2+ characters, `limit` caps each category independently (default 8, max 25) |
 | `GET /pools` | All tracked pools with their latest snapshot |
 | `GET /pools/:pool_id/history?hours=24` | One pool's snapshot history |
 | `GET /pools/trending?hours=24` | Pools ranked by `total_shares` growth over the window |
@@ -158,7 +159,9 @@ loss.
 | `/watchlist` | Pinned pools/tokens/lending positions in one place |
 
 A "Live"/"Offline" pill in the sidebar shows the SSE connection status, and `WARNING`+ alerts pop a
-toast from anywhere in the app (see "Live updates" below).
+toast from anywhere in the app (see "Live updates" below). The sidebar search bar (backed by
+`GET /search`) jumps straight to a pool, token, or account from anywhere in the app — type 2+
+characters and pick a result (arrow keys + Enter work too).
 
 ## Alerting
 

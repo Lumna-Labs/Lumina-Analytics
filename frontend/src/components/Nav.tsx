@@ -2,6 +2,7 @@ import { NavLink } from "react-router-dom";
 import { useThemeMode } from "../theme";
 import type { ThemeMode } from "../theme";
 import { LiveBadge } from "./LiveBadge";
+import { SearchBar } from "./SearchBar";
 
 const links = [
   { to: "/", label: "TVL Overview", end: true },
@@ -29,6 +30,7 @@ export function Nav() {
         Lumina
       </div>
       <LiveBadge />
+      <SearchBar />
       <nav>
         {links.map((l) => (
           <NavLink

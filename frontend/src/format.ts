@@ -54,6 +54,30 @@ export function truncateMiddle(s: string, head = 6, tail = 6): string {
   return `${s.slice(0, head)}…${s.slice(-tail)}`;
 }
 
+/**
+ * Builds the in-app route for a global-search hit (see `api.search`). A
+ * token's `key` is packed by the backend as `"code:issuer"`; split on the
+ * first colon since neither an asset code nor a Stellar address can contain
+ * one, so a colon unambiguously marks the boundary.
+ */
+export function searchResultHref(result: {
+  result_type: "pool" | "token" | "account";
+  key: string;
+}): string {
+  switch (result.result_type) {
+    case "pool":
+      return `/pools/${encodeURIComponent(result.key)}`;
+    case "token": {
+      const sep = result.key.indexOf(":");
+      const code = sep === -1 ? result.key : result.key.slice(0, sep);
+      const issuer = sep === -1 ? "" : result.key.slice(sep + 1);
+      return `/tokens/${encodeURIComponent(code)}/${encodeURIComponent(issuer)}`;
+    }
+    case "account":
+      return `/accounts/${encodeURIComponent(result.key)}`;
+  }
+}
+
 export function fmtTime(iso: string | null | undefined): string {
   if (!iso) return "—";
   const d = new Date(iso);

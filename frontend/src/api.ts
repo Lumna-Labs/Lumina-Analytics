@@ -142,6 +142,16 @@ export interface AlertRule {
   created_at: string;
 }
 
+export type SearchResultType = "pool" | "token" | "account";
+
+export interface SearchResult {
+  result_type: SearchResultType;
+  title: string;
+  subtitle: string | null;
+  /** Opaque identifier used to build the detail-page link — see `searchResultHref`. */
+  key: string;
+}
+
 export type WatchlistItemType = "pool" | "token" | "lending_position";
 
 export interface WatchlistItem {
@@ -189,6 +199,8 @@ export const api = {
     ),
   liquidations: () => get<LiquidationsResponse>("/liquidations"),
   alerts: (limit = 100) => get<AlertRow[]>(`/alerts?limit=${limit}`),
+  search: (q: string, limit = 8) =>
+    get<SearchResult[]>(`/search?q=${encodeURIComponent(q)}&limit=${limit}`),
 
   alertChannels: () => get<AlertChannel[]>("/alert-channels"),
   createAlertChannel: (body: {
