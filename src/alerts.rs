@@ -73,6 +73,20 @@ pub fn severity_for_whale_multiple(amount: Decimal, threshold: Decimal) -> Sever
     }
 }
 
+/// Severity for a pool liquidity drop, given how far past the configured
+/// threshold the drop went. Callers only invoke this once a drop has already
+/// cleared `threshold_pct` (see `logic::percent_change` +
+/// `bin/ingest.rs::ingest_pool`), so unlike `severity_for_whale_multiple`
+/// there's no `Info` case here — a sub-threshold drop isn't alert-worthy at
+/// all, since pool liquidity fluctuates constantly in normal operation.
+pub fn severity_for_liquidity_drop(drop_pct: Decimal, threshold_pct: Decimal) -> Severity {
+    if drop_pct >= threshold_pct * Decimal::from(2) {
+        Severity::Critical
+    } else {
+        Severity::Warning
+    }
+}
+
 /// Records an alert, best-effort delivers it to the legacy single
 /// `ALERT_WEBHOOK_URL` (if configured) and every DB-configured alert channel
 /// (`alert_channels`) that meets its own minimum severity, and publishes a
@@ -229,6 +243,26 @@ mod tests {
         assert_eq!(
             severity_for_whale_multiple(Decimal::from(1), Decimal::ZERO),
             Severity::Info
+        );
+    }
+
+    #[test]
+    fn liquidity_drop_at_threshold_is_warning() {
+        assert_eq!(
+            severity_for_liquidity_drop(Decimal::from(30), Decimal::from(30)),
+            Severity::Warning
+        );
+    }
+
+    #[test]
+    fn liquidity_drop_at_double_threshold_is_critical() {
+        assert_eq!(
+            severity_for_liquidity_drop(Decimal::from(60), Decimal::from(30)),
+            Severity::Critical
+        );
+        assert_eq!(
+            severity_for_liquidity_drop(Decimal::from(90), Decimal::from(30)),
+            Severity::Critical
         );
     }
 

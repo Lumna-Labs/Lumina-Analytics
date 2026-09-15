@@ -98,9 +98,12 @@ async fn run_once(
     // fixes both: one fsync for the whole cycle, and all-or-nothing writes.
     let mut tx = pool.begin().await?;
 
+    let mut pending_alerts = Vec::new();
     for lp in &pools {
-        if let Err(e) = ingest_pool(&mut tx, now, lp).await {
-            tracing::warn!("skipping pool {}: {e:?}", lp.id);
+        match ingest_pool(&mut tx, now, lp, config.liquidity_drop_threshold_pct).await {
+            Ok(Some(alert)) => pending_alerts.push(alert),
+            Ok(None) => {}
+            Err(e) => tracing::warn!("skipping pool {}: {e:?}", lp.id),
         }
     }
 
@@ -126,6 +129,22 @@ async fn run_once(
     }
 
     tx.commit().await?;
+
+    for alert in pending_alerts {
+        if let Err(e) = alerts::record(
+            pool,
+            http,
+            config,
+            alert.kind,
+            alert.severity,
+            alert.message,
+            alert.details,
+        )
+        .await
+        {
+            tracing::warn!("failed to record liquidity-drop alert: {e:?}");
+        }
+    }
 
     ingest_payments(pool, horizon, http, config).await?;
 
@@ -295,11 +314,18 @@ async fn ingest_prices(
     Ok(())
 }
 
+/// Ingests one pool's snapshot and, if its `total_shares` dropped by at
+/// least `liquidity_drop_threshold_pct` versus the last snapshot on record,
+/// returns a pending alert (deferred until after `tx.commit()`, same reason
+/// as whale-payment alerts — see `PendingAlert`). A pool seen for the first
+/// time this cycle has nothing to compare against, so it never alerts on its
+/// first snapshot.
 async fn ingest_pool(
     tx: &mut sqlx::PgConnection,
     now: chrono::DateTime<Utc>,
     lp: &LiquidityPool,
-) -> anyhow::Result<()> {
+    liquidity_drop_threshold_pct: Decimal,
+) -> anyhow::Result<Option<PendingAlert>> {
     let (asset_a, asset_b) = match (lp.reserves.first(), lp.reserves.get(1)) {
         (Some(a), Some(b)) => (a, b),
         _ => anyhow::bail!("pool {} has fewer than 2 reserves", lp.id),
@@ -308,6 +334,8 @@ async fn ingest_pool(
     let reserve_b = Decimal::from_str(&asset_b.amount)?;
     let total_shares = Decimal::from_str(&lp.total_shares)?;
     let trustline_count: i32 = lp.total_trustlines.parse().unwrap_or(0);
+
+    let previous_shares = db::latest_pool_total_shares(&mut *tx, &lp.id).await?;
 
     db::upsert_pool(&mut *tx, &lp.id, &asset_a.asset, &asset_b.asset, lp.fee_bp).await?;
     db::insert_pool_snapshot(
@@ -320,7 +348,40 @@ async fn ingest_pool(
         trustline_count,
     )
     .await?;
-    Ok(())
+
+    let Some(previous_shares) = previous_shares else {
+        return Ok(None);
+    };
+    let Some(pct_change) = logic::percent_change(previous_shares, total_shares) else {
+        return Ok(None);
+    };
+    if !pct_change.is_sign_negative() {
+        return Ok(None);
+    }
+    let drop_pct = -pct_change;
+    if drop_pct < liquidity_drop_threshold_pct {
+        return Ok(None);
+    }
+
+    let severity = alerts::severity_for_liquidity_drop(drop_pct, liquidity_drop_threshold_pct);
+    let message = format!(
+        "Liquidity drop: pool {} ({}/{}) total shares fell {drop_pct:.1}% ({previous_shares} -> {total_shares})",
+        lp.id, asset_a.asset, asset_b.asset
+    );
+    let details = json!({
+        "pool_id": lp.id,
+        "asset_a": asset_a.asset,
+        "asset_b": asset_b.asset,
+        "shares_before": previous_shares.to_string(),
+        "shares_now": total_shares.to_string(),
+        "drop_pct": drop_pct.to_string(),
+    });
+    Ok(Some(PendingAlert {
+        kind: "liquidity_drop",
+        severity,
+        message,
+        details,
+    }))
 }
 
 /// Returns a pending alert if the payment met the whale threshold (the

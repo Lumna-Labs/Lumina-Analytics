@@ -75,6 +75,12 @@ pub struct Config {
     /// deployment, not a correctness dependency, so it fails open (no key
     /// configured = no gate) rather than lock an operator out by accident.
     pub admin_api_key: Option<String>,
+    /// Minimum percent drop in a pool's `total_shares` between consecutive
+    /// ingest cycles that's worth alerting on. Pool liquidity fluctuates
+    /// constantly in normal operation, so this is deliberately a "sudden,
+    /// large" threshold rather than firing on any decrease — see
+    /// `alerts::severity_for_liquidity_drop`.
+    pub liquidity_drop_threshold_pct: Decimal,
 }
 
 impl Config {
@@ -122,6 +128,10 @@ impl Config {
                 .and_then(|v| v.parse().ok())
                 .unwrap_or(40),
             admin_api_key: env::var("ADMIN_API_KEY").ok().filter(|s| !s.is_empty()),
+            liquidity_drop_threshold_pct: env::var("LIQUIDITY_DROP_THRESHOLD_PCT")
+                .ok()
+                .and_then(|v| Decimal::from_str(&v).ok())
+                .unwrap_or(Decimal::from(30)),
         }
     }
 
@@ -222,6 +232,7 @@ mod tests {
             rate_limit_rps: 0,
             rate_limit_burst: 40,
             admin_api_key: None,
+            liquidity_drop_threshold_pct: Decimal::from(30),
         }
     }
 }

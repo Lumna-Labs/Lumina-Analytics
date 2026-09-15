@@ -68,6 +68,33 @@ where
     Ok(())
 }
 
+/// The `total_shares` of a pool's most recent snapshot, if any — used to
+/// detect a sudden liquidity drop by comparing against the snapshot about to
+/// be inserted (see `ingest_pool` in `bin/ingest.rs`). `None` for a pool
+/// seen for the first time this cycle, since there's nothing to compare
+/// against yet.
+pub async fn latest_pool_total_shares<'e, E>(
+    executor: E,
+    pool_id: &str,
+) -> anyhow::Result<Option<Decimal>>
+where
+    E: sqlx::PgExecutor<'e>,
+{
+    let row: Option<(Decimal,)> = sqlx::query_as(
+        r#"
+        SELECT total_shares
+        FROM pool_snapshots
+        WHERE pool_id = $1
+        ORDER BY time DESC
+        LIMIT 1
+        "#,
+    )
+    .bind(pool_id)
+    .fetch_optional(executor)
+    .await?;
+    Ok(row.map(|(v,)| v))
+}
+
 pub async fn list_pools_with_latest(
     pool: &PgPool,
     limit: i64,

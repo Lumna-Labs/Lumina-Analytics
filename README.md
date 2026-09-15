@@ -132,6 +132,7 @@ All variables live in `.env` (see `.env.example`); every one has a sane default 
 | `BLEND_ASSET_PRICES_USD` | empty | Comma-separated `contract:price` overrides; turns on `ltv`/`health_factor` for those reserves |
 | `ALERT_WEBHOOK_URL` | unset | Slack-compatible webhook for whale/risk alerts; alerts are recorded either way |
 | `ALERT_MIN_SEVERITY` | `WARNING` | Minimum severity (`INFO`/`WARNING`/`CRITICAL`) that triggers the webhook |
+| `LIQUIDITY_DROP_THRESHOLD_PCT` | `30` | Minimum percent drop in a pool's `total_shares` between consecutive ingest cycles that triggers a `liquidity_drop` alert |
 | `RATE_LIMIT_RPS` | `0` (disabled) | Per-client-IP requests/sec on the API; `0` disables rate limiting |
 | `RATE_LIMIT_BURST` | `40` | Token-bucket burst capacity when rate limiting is enabled |
 | `ADMIN_API_KEY` | unset | Shared secret required as an `X-Admin-Key` header to write alert rules/channels or watchlist items; unset = no gate |
@@ -192,6 +193,11 @@ table (visible on the dashboard's Alerts page), independent of any external conf
   multiples of `WHALE_THRESHOLD` it cleared (≥5x = `WARNING`, ≥20x = `CRITICAL`, otherwise `INFO`).
 - **Lending risk escalation** — a Blend position crossing *upward* into `HIGH` or `CRITICAL` risk
   (only possible once `BLEND_ASSET_PRICES_USD` makes `ltv` computable for that position).
+- **Pool liquidity drops** — a pool's `total_shares` falling by at least `LIQUIDITY_DROP_THRESHOLD_PCT`
+  versus the previous ingest cycle (`WARNING`, or `CRITICAL` at 2x the threshold). Pool liquidity
+  fluctuates constantly in normal operation, so this deliberately only fires on a sudden, large drop
+  rather than every decrease; a pool's first-ever snapshot never alerts, since there's nothing yet to
+  compare it against.
 
 Set `ALERT_WEBHOOK_URL` to also push `WARNING`+ alerts (configurable via `ALERT_MIN_SEVERITY`) to a
 Slack-compatible incoming webhook. Webhook delivery is best-effort: a failure is logged and never
