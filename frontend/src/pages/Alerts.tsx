@@ -55,6 +55,19 @@ export function Alerts() {
     }
   }
 
+  async function unacknowledge(id: number) {
+    setAcking(id);
+    try {
+      await api.unacknowledgeAlert(id);
+      await alerts.refetch();
+    } catch {
+      // Best-effort UI action, same as acknowledge: a failed undo just
+      // leaves the alert acknowledged.
+    } finally {
+      setAcking(null);
+    }
+  }
+
   async function acknowledgeAllVisible() {
     if (unackedVisible.length === 0) return;
     setAckingAll(true);
@@ -149,9 +162,15 @@ export function Alerts() {
                   <td>{a.message}</td>
                   <td>
                     {a.acknowledged_at ? (
-                      <span title={fmtTime(a.acknowledged_at)} style={{ color: "var(--muted)", fontSize: 12 }}>
-                        Acked
-                      </span>
+                      <button
+                        type="button"
+                        className="export-btn"
+                        title={`Acknowledged ${fmtTime(a.acknowledged_at)} — click to undo`}
+                        onClick={() => unacknowledge(a.id)}
+                        disabled={acking === a.id}
+                      >
+                        {acking === a.id ? "Undoing…" : "Acked ↩"}
+                      </button>
                     ) : (
                       <button
                         type="button"

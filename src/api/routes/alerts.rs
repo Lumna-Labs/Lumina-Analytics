@@ -60,6 +60,24 @@ pub async fn acknowledge_alert(
     }
 }
 
+/// Reverses `acknowledge_alert` — lets an operator undo a mis-click on
+/// "Ack" or "Ack all visible" without waiting for the next qualifying event
+/// to re-raise the alert. Same admin-key gate as acknowledging.
+pub async fn unacknowledge_alert(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Path(id): Path<i64>,
+) -> impl IntoResponse {
+    if let Some(resp) = auth::guard(&state, &headers) {
+        return resp;
+    }
+    match db::unacknowledge_alert(&state.db, id).await {
+        Ok(true) => StatusCode::NO_CONTENT.into_response(),
+        Ok(false) => StatusCode::NOT_FOUND.into_response(),
+        Err(e) => err(e),
+    }
+}
+
 #[derive(Debug, Deserialize)]
 pub(super) struct AckBulkBody {
     ids: Vec<i64>,

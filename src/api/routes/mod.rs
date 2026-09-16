@@ -45,7 +45,10 @@ pub fn router(state: AppState) -> Router {
         .route("/transactions/whales", get(whales::whale_transactions))
         .route("/liquidations", get(liquidations::liquidations))
         .route("/alerts", get(alerts::alerts))
-        .route("/alerts/:id/ack", patch(alerts::acknowledge_alert))
+        .route(
+            "/alerts/:id/ack",
+            patch(alerts::acknowledge_alert).delete(alerts::unacknowledge_alert),
+        )
         .route("/alerts/ack-bulk", patch(alerts::acknowledge_alerts_bulk))
         .route(
             "/alert-channels",

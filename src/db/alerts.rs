@@ -76,6 +76,23 @@ pub async fn acknowledge_alert(pool: &sqlx::PgPool, id: i64) -> anyhow::Result<b
     Ok(result.rows_affected() > 0)
 }
 
+/// Reverses `acknowledge_alert` (idempotent, same as `acknowledge_alert`) —
+/// backs an "Undo" action for a mis-click on "Ack" or "Ack all visible".
+/// Returns `false` when `id` doesn't exist, so the handler can 404.
+pub async fn unacknowledge_alert(pool: &sqlx::PgPool, id: i64) -> anyhow::Result<bool> {
+    let result = sqlx::query(
+        r#"
+        UPDATE alerts
+        SET acknowledged_at = NULL
+        WHERE id = $1
+        "#,
+    )
+    .bind(id)
+    .execute(pool)
+    .await?;
+    Ok(result.rows_affected() > 0)
+}
+
 /// Marks every alert in `ids` acknowledged in one round trip (idempotent,
 /// same as `acknowledge_alert`) — backs the Alerts page's "Ack all visible"
 /// button, which would otherwise need one request per row. Returns how many

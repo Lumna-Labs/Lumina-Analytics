@@ -235,6 +235,7 @@ export const api = {
         (opts?.unacknowledged ? `&unacknowledged=true` : ""),
     ),
   acknowledgeAlert: (id: number) => send<void>("PATCH", `/alerts/${id}/ack`),
+  unacknowledgeAlert: (id: number) => send<void>("DELETE", `/alerts/${id}/ack`),
   acknowledgeAlerts: (ids: number[]) =>
     send<{ acknowledged: number }>("PATCH", "/alerts/ack-bulk", { ids }),
   search: (q: string, limit = 8) =>

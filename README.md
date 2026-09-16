@@ -156,6 +156,7 @@ loss.
 | `GET /liquidations` | Blend lending positions + risk-bucket summary (empty until `BLEND_POOL_IDS` is configured; `ltv`/`health_factor` stay `null` until `BLEND_ASSET_PRICES_USD` is too). Risk buckets honor any enabled `ltv_band` alert rules (see below), falling back to 70/85/95% LTV. |
 | `GET /alerts?limit=100&kind=liquidity_drop&pool_id=...&unacknowledged=true` | Recently detected alert-worthy events (outsized whale payments, lending positions crossing into a higher risk band, pool liquidity drops); `kind`, `pool_id` (matched against `details.pool_id`), and `unacknowledged` each optionally narrow the results — powers the Pool Detail page's "Recent Alerts" panel |
 | `PATCH /alerts/:id/ack` | Marks one alert acknowledged (idempotent; admin-key gated — see "Operational hardening") |
+| `DELETE /alerts/:id/ack` | Undoes an acknowledgement (idempotent, same admin-key gate) — lets a mis-click on "Ack" be reversed |
 | `PATCH /alerts/ack-bulk` | Marks every alert in a JSON `{"ids": [...]}` body acknowledged in one round trip, up to 1000 at a time (idempotent, same admin-key gate; powers the Alerts page's "Ack all visible" button) |
 | `GET /alert-channels` / `POST /alert-channels` / `DELETE /alert-channels/:id` | Manage named Slack/Discord/generic-webhook alert delivery channels (see "Alert rules & channels") |
 | `GET /alert-rules` / `POST /alert-rules` / `PATCH /alert-rules/:id` / `DELETE /alert-rules/:id` | Manage per-asset whale-threshold and LTV-band overrides (see "Alert rules & channels") |
@@ -208,7 +209,9 @@ affects ingestion or the recorded alert.
 Every alert can be individually acknowledged (`PATCH /alerts/:id/ack`, or the "Ack" button on the
 Alerts page), or acknowledged in bulk (`PATCH /alerts/ack-bulk`, or "Ack all visible" — which acks
 exactly the rows left after the page's severity/unacknowledged-only filters, not the whole table) so
-a resolved or already-actioned event stops cluttering the "Unacknowledged only" view. Acknowledging
+a resolved or already-actioned event stops cluttering the "Unacknowledged only" view. A mis-click
+can be undone with `DELETE /alerts/:id/ack` (the "Acked ↩" button becomes clickable once an alert
+is acknowledged). Acknowledging
 is purely a dashboard-side annotation — it doesn't affect webhook delivery, which has already
 happened by the time an alert is visible to ack.
 
