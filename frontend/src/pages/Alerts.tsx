@@ -17,6 +17,7 @@ const BADGE_CLASS: Record<AlertRow["severity"], string> = {
 export function Alerts() {
   const alerts = usePolled(() => api.alerts(200), [], 20_000);
   const [severity, setSeverity] = useState<string>("ALL");
+  const [kind, setKind] = useState<string>("ALL");
   const [unackedOnly, setUnackedOnly] = useState(false);
   const [acking, setAcking] = useState<number | null>(null);
   const [ackingAll, setAckingAll] = useState(false);
@@ -25,12 +26,18 @@ export function Alerts() {
     if (event.type === "alert") alerts.refetch();
   });
 
+  const kinds = useMemo(
+    () => Array.from(new Set((alerts.data ?? []).map((a) => a.kind))).sort(),
+    [alerts.data],
+  );
+
   const filtered = useMemo(() => {
     let rows = alerts.data ?? [];
     if (severity !== "ALL") rows = rows.filter((a) => a.severity === severity);
+    if (kind !== "ALL") rows = rows.filter((a) => a.kind === kind);
     if (unackedOnly) rows = rows.filter((a) => !a.acknowledged_at);
     return rows;
-  }, [alerts.data, severity, unackedOnly]);
+  }, [alerts.data, severity, kind, unackedOnly]);
 
   const unackedVisible = useMemo(
     () => filtered.filter((a) => !a.acknowledged_at).map((a) => a.id),
@@ -102,6 +109,14 @@ export function Alerts() {
           {SEVERITIES.map((s) => (
             <option key={s} value={s}>
               {s}
+            </option>
+          ))}
+        </select>
+        <select value={kind} onChange={(e) => setKind(e.target.value)}>
+          <option value="ALL">All kinds</option>
+          {kinds.map((k) => (
+            <option key={k} value={k}>
+              {k}
             </option>
           ))}
         </select>
@@ -186,7 +201,7 @@ export function Alerts() {
               ))}
               {filtered.length === 0 && (
                 <tr>
-                  <td colSpan={5}>No alerts at this severity.</td>
+                  <td colSpan={5}>No alerts match the current filters.</td>
                 </tr>
               )}
             </tbody>

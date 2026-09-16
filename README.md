@@ -178,7 +178,7 @@ loss.
 | `/whales` | Large payments network-wide, sortable, CSV export; accounts link to Account Activity |
 | `/accounts/:address` | One account's full recorded whale-payment history (sent + received), CSV export |
 | `/liquidations` | Blend lending positions bucketed by risk band, pinnable, CSV export |
-| `/alerts` | Recorded alerts, filterable by severity and unacknowledged-only, acknowledgeable individually or all-at-once (respecting the active filters), CSV export; refreshes on both a timer and live events |
+| `/alerts` | Recorded alerts, filterable by severity, kind, and unacknowledged-only, acknowledgeable (and un-acknowledgeable) individually or all-at-once (respecting the active filters), CSV export; refreshes on both a timer and live events |
 | `/alerts/settings` | Manage alert rules (per-asset whale thresholds, LTV-band overrides) and delivery channels |
 | `/watchlist` | Pinned pools/tokens/lending positions in one place |
 
