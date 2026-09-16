@@ -189,7 +189,7 @@ characters and pick a result (arrow keys + Enter work too).
 
 ## Alerting
 
-`lumina-ingest` detects two kinds of alert-worthy events and always records them to the `alerts`
+`lumina-ingest` detects three kinds of alert-worthy events and always records them to the `alerts`
 table (visible on the dashboard's Alerts page), independent of any external configuration:
 
 - **Outsized whale payments** — every newly-recorded whale payment, severity-banded by how many
@@ -208,12 +208,11 @@ affects ingestion or the recorded alert.
 
 Every alert can be individually acknowledged (`PATCH /alerts/:id/ack`, or the "Ack" button on the
 Alerts page), or acknowledged in bulk (`PATCH /alerts/ack-bulk`, or "Ack all visible" — which acks
-exactly the rows left after the page's severity/unacknowledged-only filters, not the whole table) so
-a resolved or already-actioned event stops cluttering the "Unacknowledged only" view. A mis-click
-can be undone with `DELETE /alerts/:id/ack` (the "Acked ↩" button becomes clickable once an alert
-is acknowledged). Acknowledging
-is purely a dashboard-side annotation — it doesn't affect webhook delivery, which has already
-happened by the time an alert is visible to ack.
+exactly the rows left after the page's severity/kind/unacknowledged-only filters, not the whole
+table) so a resolved or already-actioned event stops cluttering the "Unacknowledged only" view. A
+mis-click can be undone with `DELETE /alerts/:id/ack` (the "Acked ↩" button becomes clickable once
+an alert is acknowledged). Acknowledging is purely a dashboard-side annotation — it doesn't affect
+webhook delivery, which has already happened by the time an alert is visible to ack.
 
 ## Alert rules & channels
 
