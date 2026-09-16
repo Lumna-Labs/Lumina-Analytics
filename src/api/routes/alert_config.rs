@@ -49,8 +49,14 @@ pub async fn create_alert_channel(
     if let Some(resp) = auth::guard(&state, &headers) {
         return resp;
     }
+    if body.name.trim().is_empty() {
+        return bad_request("name must not be empty");
+    }
     if !["slack", "discord", "generic"].contains(&body.kind.as_str()) {
         return bad_request("kind must be one of: slack, discord, generic");
+    }
+    if !(body.url.starts_with("http://") || body.url.starts_with("https://")) {
+        return bad_request("url must start with http:// or https://");
     }
     if crate::alerts::Severity::parse(&body.min_severity).is_none() {
         return bad_request("min_severity must be one of: INFO, WARNING, CRITICAL");
@@ -119,6 +125,12 @@ pub async fn create_alert_rule(
     if let Some(resp) = auth::guard(&state, &headers) {
         return resp;
     }
+    if body.name.trim().is_empty() {
+        return bad_request("name must not be empty");
+    }
+    if body.threshold <= Decimal::ZERO {
+        return bad_request("threshold must be greater than zero");
+    }
     match body.rule_type.as_str() {
         "whale_threshold" => {
             if body.asset_code.is_none() {
@@ -156,6 +168,9 @@ pub async fn update_alert_rule(
 ) -> impl IntoResponse {
     if let Some(resp) = auth::guard(&state, &headers) {
         return resp;
+    }
+    if body.threshold <= Decimal::ZERO {
+        return bad_request("threshold must be greater than zero");
     }
     match db::update_alert_rule(&state.db, id, body.threshold, body.enabled).await {
         Ok(Some(row)) => Json(row).into_response(),

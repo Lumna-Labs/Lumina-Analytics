@@ -34,6 +34,12 @@ pub async fn create_watchlist_item(
     if !["pool", "token", "lending_position"].contains(&body.item_type.as_str()) {
         return bad_request("item_type must be one of: pool, token, lending_position");
     }
+    if body.item_key.trim().is_empty() {
+        return bad_request("item_key must not be empty");
+    }
+    if body.label.trim().is_empty() {
+        return bad_request("label must not be empty");
+    }
     match db::upsert_watchlist_item(&state.db, &body.item_type, &body.item_key, &body.label).await {
         Ok(row) => (StatusCode::CREATED, Json(row)).into_response(),
         Err(e) => err(e),

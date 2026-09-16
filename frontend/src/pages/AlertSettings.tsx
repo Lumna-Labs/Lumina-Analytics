@@ -330,6 +330,7 @@ function RulesPanel({
           value={threshold}
           onChange={(e) => setThreshold(e.target.value)}
           required
+          min="0"
           step="any"
           style={{ width: 140 }}
         />
