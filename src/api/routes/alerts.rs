@@ -59,3 +59,32 @@ pub async fn acknowledge_alert(
         Err(e) => err(e),
     }
 }
+
+#[derive(Debug, Deserialize)]
+pub(super) struct AckBulkBody {
+    ids: Vec<i64>,
+}
+
+/// Marks every alert in the request body acknowledged in one round trip —
+/// backs the Alerts page's "Ack all visible" button, which acks exactly the
+/// rows currently shown under the active severity/kind filters rather than
+/// re-deriving them server-side. Same admin-key gate and idempotence as
+/// `acknowledge_alert`. Caps the batch at 1000 ids, matching the max
+/// `/alerts?limit=` page size, since the UI never has more rows visible than
+/// that to ack at once.
+pub async fn acknowledge_alerts_bulk(
+    State(state): State<AppState>,
+    headers: HeaderMap,
+    Json(body): Json<AckBulkBody>,
+) -> impl IntoResponse {
+    if let Some(resp) = auth::guard(&state, &headers) {
+        return resp;
+    }
+    if body.ids.len() > 1000 {
+        return super::bad_request("at most 1000 ids per request");
+    }
+    match db::acknowledge_alerts(&state.db, &body.ids).await {
+        Ok(count) => Json(serde_json::json!({ "acknowledged": count })).into_response(),
+        Err(e) => err(e),
+    }
+}

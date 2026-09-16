@@ -76,6 +76,28 @@ pub async fn acknowledge_alert(pool: &sqlx::PgPool, id: i64) -> anyhow::Result<b
     Ok(result.rows_affected() > 0)
 }
 
+/// Marks every alert in `ids` acknowledged in one round trip (idempotent,
+/// same as `acknowledge_alert`) — backs the Alerts page's "Ack all visible"
+/// button, which would otherwise need one request per row. Returns how many
+/// rows were actually updated (already-acked ids don't change `updated_at`
+/// but still count, since they end up acknowledged either way).
+pub async fn acknowledge_alerts(pool: &sqlx::PgPool, ids: &[i64]) -> anyhow::Result<u64> {
+    if ids.is_empty() {
+        return Ok(0);
+    }
+    let result = sqlx::query(
+        r#"
+        UPDATE alerts
+        SET acknowledged_at = COALESCE(acknowledged_at, now())
+        WHERE id = ANY($1)
+        "#,
+    )
+    .bind(ids)
+    .execute(pool)
+    .await?;
+    Ok(result.rows_affected())
+}
+
 // ---- live events (Postgres NOTIFY, see `events`) ----
 
 /// Publishes `payload` on `channel` via `pg_notify`. Best-effort by design —

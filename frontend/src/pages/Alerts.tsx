@@ -19,6 +19,7 @@ export function Alerts() {
   const [severity, setSeverity] = useState<string>("ALL");
   const [unackedOnly, setUnackedOnly] = useState(false);
   const [acking, setAcking] = useState<number | null>(null);
+  const [ackingAll, setAckingAll] = useState(false);
 
   useLiveEvents((event) => {
     if (event.type === "alert") alerts.refetch();
@@ -30,6 +31,11 @@ export function Alerts() {
     if (unackedOnly) rows = rows.filter((a) => !a.acknowledged_at);
     return rows;
   }, [alerts.data, severity, unackedOnly]);
+
+  const unackedVisible = useMemo(
+    () => filtered.filter((a) => !a.acknowledged_at).map((a) => a.id),
+    [filtered],
+  );
 
   function exportCsv() {
     const csv = toCsv(filtered, ["time", "severity", "kind", "message"]);
@@ -46,6 +52,20 @@ export function Alerts() {
       // just leaves the alert unacknowledged — nothing else depends on it.
     } finally {
       setAcking(null);
+    }
+  }
+
+  async function acknowledgeAllVisible() {
+    if (unackedVisible.length === 0) return;
+    setAckingAll(true);
+    try {
+      await api.acknowledgeAlerts(unackedVisible);
+      await alerts.refetch();
+    } catch {
+      // Best-effort UI action, same as single-row ack: a failed bulk ack
+      // just leaves those alerts unacknowledged.
+    } finally {
+      setAckingAll(false);
     }
   }
 
@@ -85,6 +105,14 @@ export function Alerts() {
         </span>
         <button type="button" className="export-btn" onClick={exportCsv} disabled={filtered.length === 0}>
           Export CSV
+        </button>
+        <button
+          type="button"
+          className="export-btn"
+          onClick={acknowledgeAllVisible}
+          disabled={ackingAll || unackedVisible.length === 0}
+        >
+          {ackingAll ? "Acking…" : `Ack all visible (${unackedVisible.length})`}
         </button>
         <Link to="/alerts/settings" className="export-btn">
           Manage rules &amp; channels
