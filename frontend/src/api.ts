@@ -141,6 +141,18 @@ export interface PoolTrend {
   shares_change_pct: string | null;
 }
 
+export interface TokenTrend {
+  asset_code: string;
+  asset_issuer: string;
+  first_time: string;
+  last_time: string;
+  amount_before: string;
+  amount_now: string;
+  holders_before: number;
+  holders_now: number;
+  holders_change_pct: string | null;
+}
+
 export type AlertChannelKind = "slack" | "discord" | "generic";
 
 export interface AlertChannel {
@@ -217,6 +229,7 @@ export const api = {
   poolsTrending: (hours = 24) => get<PoolTrend[]>(`/pools/trending?hours=${hours}`),
   tokens: (limit = 2000, offset = 0) =>
     get<TokenWithLatest[]>(`/tokens?limit=${limit}&offset=${offset}`),
+  tokensTrending: (hours = 24) => get<TokenTrend[]>(`/tokens/trending?hours=${hours}`),
   tokenHistory: (assetCode: string, assetIssuer: string, hours = 24) =>
     get<TokenSnapshotRow[]>(
       `/tokens/${encodeURIComponent(assetCode)}/${encodeURIComponent(assetIssuer)}/history?hours=${hours}`,

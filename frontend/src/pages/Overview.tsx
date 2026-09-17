@@ -12,6 +12,7 @@ export function Overview() {
   const pools = usePolled(() => api.pools(), []);
   const tokens = usePolled(() => api.tokens(), []);
   const trending = usePolled(() => api.poolsTrending(24), []);
+  const tokenTrending = usePolled(() => api.tokensTrending(24), []);
   const whales = usePolled(() => api.whaleTransactions(10_000, 10), []);
 
   const series = tvl.data?.map((p) => ({ x: p.bucket, y: parseFloat(p.total_reserve_native) })) ?? [];
@@ -28,6 +29,9 @@ export function Overview() {
   const topPools = pools.data?.slice(0, 8) ?? [];
   const gainers = (trending.data ?? [])
     .filter((t) => t.shares_change_pct !== null)
+    .slice(0, 6);
+  const tokenGainers = (tokenTrending.data ?? [])
+    .filter((t) => t.holders_change_pct !== null)
     .slice(0, 6);
 
   return (
@@ -142,6 +146,49 @@ export function Overview() {
               </tr>
             ))}
             {trending.data && gainers.length === 0 && (
+              <tr>
+                <td colSpan={5}>
+                  Not enough history yet to compute trends — this fills in as more ingest cycles run.
+                </td>
+              </tr>
+            )}
+          </tbody>
+        </table>
+      </div>
+
+      <h2 className="section-title">Trending — Growing Holders (24h)</h2>
+      <div className="table-wrap">
+        <table>
+          <thead>
+            <tr>
+              <th>Asset</th>
+              <th>Holders Change</th>
+              <th>Holders Now</th>
+              <th>Supply Now</th>
+              <th></th>
+            </tr>
+          </thead>
+          <tbody>
+            {tokenGainers.map((t) => (
+              <tr key={t.asset_code + t.asset_issuer}>
+                <td>{t.asset_code}</td>
+                <td
+                  style={{
+                    color: parseFloat(t.holders_change_pct ?? "0") >= 0 ? "var(--good)" : "var(--critical)",
+                  }}
+                >
+                  {fmtPct(t.holders_change_pct)}
+                </td>
+                <td>{t.holders_now}</td>
+                <td>{fmtCompact(t.amount_now)}</td>
+                <td>
+                  <Link to={`/tokens/${encodeURIComponent(t.asset_code)}/${encodeURIComponent(t.asset_issuer)}`}>
+                    view →
+                  </Link>
+                </td>
+              </tr>
+            ))}
+            {tokenTrending.data && tokenGainers.length === 0 && (
               <tr>
                 <td colSpan={5}>
                   Not enough history yet to compute trends — this fills in as more ingest cycles run.

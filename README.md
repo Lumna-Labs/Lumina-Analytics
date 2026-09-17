@@ -151,6 +151,7 @@ loss.
 | `GET /pools` | All tracked pools with their latest snapshot |
 | `GET /pools/:pool_id/history?hours=24` | One pool's snapshot history |
 | `GET /pools/trending?hours=24` | Pools ranked by `total_shares` growth over the window |
+| `GET /tokens/trending?hours=24` | Tokens ranked by holder-count (`num_accounts`) growth over the window |
 | `GET /tokens` | All tracked issued assets with their latest snapshot |
 | `GET /tokens/:asset_code/:asset_issuer/history?hours=24` | One asset's snapshot history |
 | `GET /transactions/whales?min_amount=10000&limit=100&account=G...` | Large payments, enriched with a USD estimate where known; `account` restricts to payments where that address was the source or destination (powers the per-account Activity page) |
@@ -171,7 +172,7 @@ loss.
 
 | Route | Description |
 |---|---|
-| `/` | TVL overview: locked-liquidity chart, top pools, trending pools, recent whale payments |
+| `/` | TVL overview: locked-liquidity chart, top pools, trending pools, trending tokens by holder growth, recent whale payments |
 | `/pools` | All tracked pools, sortable/searchable/pinnable, CSV export |
 | `/pools/:poolId` | One pool's reserve/share history, plus its own recent liquidity-drop alerts |
 | `/tokens` | All tracked issued assets, sortable/searchable/pinnable, CSV export |

@@ -2,7 +2,7 @@ use chrono::{DateTime, Utc};
 use rust_decimal::Decimal;
 use sqlx::PgPool;
 
-use crate::models::{TokenSnapshotRow, TokenWithLatest};
+use crate::models::{TokenSnapshotRow, TokenTrendRaw, TokenWithLatest};
 
 pub async fn upsert_token<'e, E>(
     executor: E,
@@ -119,6 +119,48 @@ pub async fn count_tokens(pool: &PgPool) -> anyhow::Result<i64> {
         .fetch_one(pool)
         .await?;
     Ok(count)
+}
+
+/// Growth in each token's holder count between the first and last snapshot
+/// observed within the window, used to surface "trending" tokens — the
+/// token equivalent of `pool_trends`. Holder count (rather than supply) is
+/// the growth metric since supply can move purely from minting/burning with
+/// no change in adoption, while a growing holder count reflects new
+/// accounts actually holding the asset.
+pub async fn token_trends(
+    pool: &PgPool,
+    since: DateTime<Utc>,
+) -> anyhow::Result<Vec<TokenTrendRaw>> {
+    let rows = sqlx::query_as::<_, TokenTrendRaw>(
+        r#"
+        WITH earliest AS (
+            SELECT DISTINCT ON (asset_code, asset_issuer)
+                asset_code, asset_issuer, time, amount, num_accounts
+            FROM token_snapshots
+            WHERE time >= $1
+            ORDER BY asset_code, asset_issuer, time ASC
+        ),
+        latest AS (
+            SELECT DISTINCT ON (asset_code, asset_issuer)
+                asset_code, asset_issuer, time, amount, num_accounts
+            FROM token_snapshots
+            WHERE time >= $1
+            ORDER BY asset_code, asset_issuer, time DESC
+        )
+        SELECT
+            e.asset_code, e.asset_issuer,
+            e.time AS first_time, l.time AS last_time,
+            e.amount AS amount_before, l.amount AS amount_now,
+            e.num_accounts AS holders_before, l.num_accounts AS holders_now
+        FROM earliest e
+        JOIN latest l ON l.asset_code = e.asset_code AND l.asset_issuer = e.asset_issuer
+        WHERE l.time > e.time
+        "#,
+    )
+    .bind(since)
+    .fetch_all(pool)
+    .await?;
+    Ok(rows)
 }
 
 pub async fn token_history(

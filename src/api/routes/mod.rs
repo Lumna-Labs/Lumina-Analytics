@@ -38,6 +38,7 @@ pub fn router(state: AppState) -> Router {
         .route("/pools/:pool_id/history", get(pools::pool_history))
         .route("/pools/trending", get(pools::pools_trending))
         .route("/tokens", get(tokens::tokens))
+        .route("/tokens/trending", get(tokens::tokens_trending))
         .route(
             "/tokens/:asset_code/:asset_issuer/history",
             get(tokens::token_history),
