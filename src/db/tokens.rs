@@ -26,6 +26,35 @@ where
     Ok(())
 }
 
+/// The `num_accounts` (holder count) of an asset's most recent snapshot, if
+/// any — used to detect a sudden holder-count drop by comparing against the
+/// snapshot about to be inserted (see `ingest_token` in `bin/ingest.rs`).
+/// `None` for an asset seen for the first time this cycle, since there's
+/// nothing to compare against yet.
+pub async fn latest_token_num_accounts<'e, E>(
+    executor: E,
+    asset_code: &str,
+    asset_issuer: &str,
+) -> anyhow::Result<Option<i32>>
+where
+    E: sqlx::PgExecutor<'e>,
+{
+    let row: Option<(i32,)> = sqlx::query_as(
+        r#"
+        SELECT num_accounts
+        FROM token_snapshots
+        WHERE asset_code = $1 AND asset_issuer = $2
+        ORDER BY time DESC
+        LIMIT 1
+        "#,
+    )
+    .bind(asset_code)
+    .bind(asset_issuer)
+    .fetch_optional(executor)
+    .await?;
+    Ok(row.map(|(v,)| v))
+}
+
 pub async fn insert_token_snapshot<'e, E>(
     executor: E,
     time: DateTime<Utc>,

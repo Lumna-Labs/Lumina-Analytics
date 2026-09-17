@@ -87,6 +87,22 @@ pub fn severity_for_liquidity_drop(drop_pct: Decimal, threshold_pct: Decimal) ->
     }
 }
 
+/// Severity for a token holder-count drop, given how far past the
+/// configured threshold the drop went. Same shape as
+/// `severity_for_liquidity_drop` (no `Info` case — callers only invoke this
+/// once a drop has already cleared `threshold_pct`; see
+/// `logic::percent_change` + `bin/ingest.rs::ingest_token`) since holder
+/// count, like pool liquidity, fluctuates in normal operation and this is
+/// deliberately a "sudden, large" threshold rather than firing on any
+/// decrease.
+pub fn severity_for_holder_drop(drop_pct: Decimal, threshold_pct: Decimal) -> Severity {
+    if drop_pct >= threshold_pct * Decimal::from(2) {
+        Severity::Critical
+    } else {
+        Severity::Warning
+    }
+}
+
 /// Records an alert, best-effort delivers it to the legacy single
 /// `ALERT_WEBHOOK_URL` (if configured) and every DB-configured alert channel
 /// (`alert_channels`) that meets its own minimum severity, and publishes a
@@ -262,6 +278,26 @@ mod tests {
         );
         assert_eq!(
             severity_for_liquidity_drop(Decimal::from(90), Decimal::from(30)),
+            Severity::Critical
+        );
+    }
+
+    #[test]
+    fn holder_drop_at_threshold_is_warning() {
+        assert_eq!(
+            severity_for_holder_drop(Decimal::from(20), Decimal::from(20)),
+            Severity::Warning
+        );
+    }
+
+    #[test]
+    fn holder_drop_at_double_threshold_is_critical() {
+        assert_eq!(
+            severity_for_holder_drop(Decimal::from(40), Decimal::from(20)),
+            Severity::Critical
+        );
+        assert_eq!(
+            severity_for_holder_drop(Decimal::from(90), Decimal::from(20)),
             Severity::Critical
         );
     }

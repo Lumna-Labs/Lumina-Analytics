@@ -18,6 +18,12 @@ pub(super) struct AlertsQuery {
     /// present on pool-scoped alert kinds) — powers the Pool Detail page's
     /// "Recent Alerts" panel.
     pool_id: Option<String>,
+    /// Narrow to alerts about one token (matched against
+    /// `details.asset_code`/`details.asset_issuer`, present on token-scoped
+    /// alert kinds) — powers the Token Detail page's "Recent Alerts" panel.
+    /// Both must be given together to narrow by asset.
+    asset_code: Option<String>,
+    asset_issuer: Option<String>,
     /// When `true`, only alerts that haven't been acknowledged yet.
     #[serde(default)]
     unacknowledged: bool,
@@ -33,6 +39,8 @@ pub async fn alerts(
         limit,
         q.kind.as_deref(),
         q.pool_id.as_deref(),
+        q.asset_code.as_deref(),
+        q.asset_issuer.as_deref(),
         q.unacknowledged,
     )
     .await

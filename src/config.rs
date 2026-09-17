@@ -81,6 +81,11 @@ pub struct Config {
     /// large" threshold rather than firing on any decrease — see
     /// `alerts::severity_for_liquidity_drop`.
     pub liquidity_drop_threshold_pct: Decimal,
+    /// Minimum percent drop in a token's holder count (`num_accounts`)
+    /// between consecutive ingest cycles that's worth alerting on. Same
+    /// "sudden, large" rationale as `liquidity_drop_threshold_pct` — see
+    /// `alerts::severity_for_holder_drop`.
+    pub holder_drop_threshold_pct: Decimal,
 }
 
 impl Config {
@@ -132,6 +137,10 @@ impl Config {
                 .ok()
                 .and_then(|v| Decimal::from_str(&v).ok())
                 .unwrap_or(Decimal::from(30)),
+            holder_drop_threshold_pct: env::var("HOLDER_DROP_THRESHOLD_PCT")
+                .ok()
+                .and_then(|v| Decimal::from_str(&v).ok())
+                .unwrap_or(Decimal::from(20)),
         }
     }
 
@@ -233,6 +242,7 @@ mod tests {
             rate_limit_burst: 40,
             admin_api_key: None,
             liquidity_drop_threshold_pct: Decimal::from(30),
+            holder_drop_threshold_pct: Decimal::from(20),
         }
     }
 }

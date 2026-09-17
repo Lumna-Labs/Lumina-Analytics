@@ -227,11 +227,22 @@ export const api = {
         (account ? `&account=${encodeURIComponent(account)}` : ""),
     ),
   liquidations: () => get<LiquidationsResponse>("/liquidations"),
-  alerts: (limit = 100, opts?: { kind?: string; poolId?: string; unacknowledged?: boolean }) =>
+  alerts: (
+    limit = 100,
+    opts?: {
+      kind?: string;
+      poolId?: string;
+      assetCode?: string;
+      assetIssuer?: string;
+      unacknowledged?: boolean;
+    },
+  ) =>
     get<AlertRow[]>(
       `/alerts?limit=${limit}` +
         (opts?.kind ? `&kind=${encodeURIComponent(opts.kind)}` : "") +
         (opts?.poolId ? `&pool_id=${encodeURIComponent(opts.poolId)}` : "") +
+        (opts?.assetCode ? `&asset_code=${encodeURIComponent(opts.assetCode)}` : "") +
+        (opts?.assetIssuer ? `&asset_issuer=${encodeURIComponent(opts.assetIssuer)}` : "") +
         (opts?.unacknowledged ? `&unacknowledged=true` : ""),
     ),
   acknowledgeAlert: (id: number) => send<void>("PATCH", `/alerts/${id}/ack`),

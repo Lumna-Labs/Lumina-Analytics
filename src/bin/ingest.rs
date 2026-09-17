@@ -10,7 +10,7 @@ use lumina::alert_rules;
 use lumina::alerts::{self, Severity};
 use lumina::config::Config;
 use lumina::db;
-use lumina::horizon::{HorizonClient, LiquidityPool, PaymentRecord};
+use lumina::horizon::{AssetRecord, HorizonClient, LiquidityPool, PaymentRecord};
 use lumina::logic;
 use lumina::models::AlertRuleRow;
 use lumina::pricing;
@@ -114,18 +114,11 @@ async fn run_once(
     }
 
     for a in &assets {
-        let amount = Decimal::from_str(&a.balances.authorized).unwrap_or_default();
-        db::upsert_token(&mut *tx, &a.asset_code, &a.asset_issuer).await?;
-        db::insert_token_snapshot(
-            &mut *tx,
-            now,
-            &a.asset_code,
-            &a.asset_issuer,
-            amount,
-            a.accounts.authorized,
-            a.num_claimable_balances,
-        )
-        .await?;
+        match ingest_token(&mut tx, now, a, config.holder_drop_threshold_pct).await {
+            Ok(Some(alert)) => pending_alerts.push(alert),
+            Ok(None) => {}
+            Err(e) => tracing::warn!("skipping asset {}:{}: {e:?}", a.asset_code, a.asset_issuer),
+        }
     }
 
     tx.commit().await?;
@@ -378,6 +371,72 @@ async fn ingest_pool(
     });
     Ok(Some(PendingAlert {
         kind: "liquidity_drop",
+        severity,
+        message,
+        details,
+    }))
+}
+
+/// Ingests one asset's snapshot and, if its holder count (`num_accounts`)
+/// dropped by at least `holder_drop_threshold_pct` versus the last snapshot
+/// on record, returns a pending alert (deferred until after `tx.commit()`,
+/// same reason as the other alert kinds — see `PendingAlert`). An asset seen
+/// for the first time this cycle has nothing to compare against, so it
+/// never alerts on its first snapshot.
+async fn ingest_token(
+    tx: &mut sqlx::PgConnection,
+    now: chrono::DateTime<Utc>,
+    a: &AssetRecord,
+    holder_drop_threshold_pct: Decimal,
+) -> anyhow::Result<Option<PendingAlert>> {
+    let amount = Decimal::from_str(&a.balances.authorized).unwrap_or_default();
+
+    let previous_num_accounts =
+        db::latest_token_num_accounts(&mut *tx, &a.asset_code, &a.asset_issuer).await?;
+
+    db::upsert_token(&mut *tx, &a.asset_code, &a.asset_issuer).await?;
+    db::insert_token_snapshot(
+        &mut *tx,
+        now,
+        &a.asset_code,
+        &a.asset_issuer,
+        amount,
+        a.accounts.authorized,
+        a.num_claimable_balances,
+    )
+    .await?;
+
+    let Some(previous_num_accounts) = previous_num_accounts else {
+        return Ok(None);
+    };
+    let Some(pct_change) = logic::percent_change(
+        Decimal::from(previous_num_accounts),
+        Decimal::from(a.accounts.authorized),
+    ) else {
+        return Ok(None);
+    };
+    if !pct_change.is_sign_negative() {
+        return Ok(None);
+    }
+    let drop_pct = -pct_change;
+    if drop_pct < holder_drop_threshold_pct {
+        return Ok(None);
+    }
+
+    let severity = alerts::severity_for_holder_drop(drop_pct, holder_drop_threshold_pct);
+    let message = format!(
+        "Holder drop: {} ({}) holder count fell {drop_pct:.1}% ({previous_num_accounts} -> {})",
+        a.asset_code, a.asset_issuer, a.accounts.authorized
+    );
+    let details = json!({
+        "asset_code": a.asset_code,
+        "asset_issuer": a.asset_issuer,
+        "holders_before": previous_num_accounts,
+        "holders_now": a.accounts.authorized,
+        "drop_pct": drop_pct.to_string(),
+    });
+    Ok(Some(PendingAlert {
+        kind: "holder_drop",
         severity,
         message,
         details,

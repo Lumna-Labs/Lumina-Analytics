@@ -29,14 +29,21 @@ pub async fn insert_alert(
 /// Lists recent alerts, optionally narrowed to one `kind` (e.g.
 /// `liquidity_drop`), one `pool_id` — matched against `details->>'pool_id'`,
 /// present on pool-scoped alert kinds (`liquidity_drop`) so a pool's detail
-/// page can show only alerts about itself instead of the global feed — and,
-/// when `unacknowledged_only` is set, alerts that haven't been acked yet.
-/// Every filter is skipped (matches everything) when left at its default.
+/// page can show only alerts about itself instead of the global feed — one
+/// `asset_code`/`asset_issuer` pair — matched against
+/// `details->>'asset_code'`/`details->>'asset_issuer'`, present on
+/// token-scoped alert kinds (`holder_drop`), same purpose for a token's
+/// detail page — and, when `unacknowledged_only` is set, alerts that
+/// haven't been acked yet. Every filter is skipped (matches everything) when
+/// left at its default.
+#[allow(clippy::too_many_arguments)]
 pub async fn list_alerts(
     pool: &sqlx::PgPool,
     limit: i64,
     kind: Option<&str>,
     pool_id: Option<&str>,
+    asset_code: Option<&str>,
+    asset_issuer: Option<&str>,
     unacknowledged_only: bool,
 ) -> anyhow::Result<Vec<AlertRow>> {
     let rows = sqlx::query_as::<_, AlertRow>(
@@ -45,7 +52,9 @@ pub async fn list_alerts(
         FROM alerts
         WHERE ($2::text IS NULL OR kind = $2)
           AND ($3::text IS NULL OR details ->> 'pool_id' = $3)
-          AND (NOT $4 OR acknowledged_at IS NULL)
+          AND ($4::text IS NULL OR details ->> 'asset_code' = $4)
+          AND ($5::text IS NULL OR details ->> 'asset_issuer' = $5)
+          AND (NOT $6 OR acknowledged_at IS NULL)
         ORDER BY time DESC
         LIMIT $1
         "#,
@@ -53,6 +62,8 @@ pub async fn list_alerts(
     .bind(limit)
     .bind(kind)
     .bind(pool_id)
+    .bind(asset_code)
+    .bind(asset_issuer)
     .bind(unacknowledged_only)
     .fetch_all(pool)
     .await?;

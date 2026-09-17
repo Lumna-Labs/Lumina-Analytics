@@ -133,6 +133,7 @@ All variables live in `.env` (see `.env.example`); every one has a sane default 
 | `ALERT_WEBHOOK_URL` | unset | Slack-compatible webhook for whale/risk alerts; alerts are recorded either way |
 | `ALERT_MIN_SEVERITY` | `WARNING` | Minimum severity (`INFO`/`WARNING`/`CRITICAL`) that triggers the webhook |
 | `LIQUIDITY_DROP_THRESHOLD_PCT` | `30` | Minimum percent drop in a pool's `total_shares` between consecutive ingest cycles that triggers a `liquidity_drop` alert |
+| `HOLDER_DROP_THRESHOLD_PCT` | `20` | Minimum percent drop in a token's holder count (`num_accounts`) between consecutive ingest cycles that triggers a `holder_drop` alert |
 | `RATE_LIMIT_RPS` | `0` (disabled) | Per-client-IP requests/sec on the API; `0` disables rate limiting |
 | `RATE_LIMIT_BURST` | `40` | Token-bucket burst capacity when rate limiting is enabled |
 | `ADMIN_API_KEY` | unset | Shared secret required as an `X-Admin-Key` header to write alert rules/channels/acknowledgements or watchlist items; unset = no gate |
@@ -154,7 +155,7 @@ loss.
 | `GET /tokens/:asset_code/:asset_issuer/history?hours=24` | One asset's snapshot history |
 | `GET /transactions/whales?min_amount=10000&limit=100&account=G...` | Large payments, enriched with a USD estimate where known; `account` restricts to payments where that address was the source or destination (powers the per-account Activity page) |
 | `GET /liquidations` | Blend lending positions + risk-bucket summary (empty until `BLEND_POOL_IDS` is configured; `ltv`/`health_factor` stay `null` until `BLEND_ASSET_PRICES_USD` is too). Risk buckets honor any enabled `ltv_band` alert rules (see below), falling back to 70/85/95% LTV. |
-| `GET /alerts?limit=100&kind=liquidity_drop&pool_id=...&unacknowledged=true` | Recently detected alert-worthy events (outsized whale payments, lending positions crossing into a higher risk band, pool liquidity drops); `kind`, `pool_id` (matched against `details.pool_id`), and `unacknowledged` each optionally narrow the results — powers the Pool Detail page's "Recent Alerts" panel |
+| `GET /alerts?limit=100&kind=liquidity_drop&pool_id=...&asset_code=...&asset_issuer=...&unacknowledged=true` | Recently detected alert-worthy events (outsized whale payments, lending positions crossing into a higher risk band, pool liquidity drops, token holder-count drops); `kind`, `pool_id` (matched against `details.pool_id`), `asset_code`/`asset_issuer` (matched against `details.asset_code`/`details.asset_issuer`), and `unacknowledged` each optionally narrow the results — powers the Pool Detail and Token Detail pages' "Recent Alerts" panels |
 | `PATCH /alerts/:id/ack` | Marks one alert acknowledged (idempotent; admin-key gated — see "Operational hardening") |
 | `DELETE /alerts/:id/ack` | Undoes an acknowledgement (idempotent, same admin-key gate) — lets a mis-click on "Ack" be reversed |
 | `PATCH /alerts/ack-bulk` | Marks every alert in a JSON `{"ids": [...]}` body acknowledged in one round trip, up to 1000 at a time (idempotent, same admin-key gate; powers the Alerts page's "Ack all visible" button) |
@@ -174,7 +175,7 @@ loss.
 | `/pools` | All tracked pools, sortable/searchable/pinnable, CSV export |
 | `/pools/:poolId` | One pool's reserve/share history, plus its own recent liquidity-drop alerts |
 | `/tokens` | All tracked issued assets, sortable/searchable/pinnable, CSV export |
-| `/tokens/:assetCode/:assetIssuer` | One asset's supply/holder history |
+| `/tokens/:assetCode/:assetIssuer` | One asset's supply/holder history, plus its own recent holder-drop alerts |
 | `/whales` | Large payments network-wide, sortable, CSV export; accounts link to Account Activity |
 | `/accounts/:address` | One account's full recorded whale-payment history (sent + received), CSV export |
 | `/liquidations` | Blend lending positions bucketed by risk band, pinnable, CSV export |
@@ -189,7 +190,7 @@ characters and pick a result (arrow keys + Enter work too).
 
 ## Alerting
 
-`lumina-ingest` detects three kinds of alert-worthy events and always records them to the `alerts`
+`lumina-ingest` detects four kinds of alert-worthy events and always records them to the `alerts`
 table (visible on the dashboard's Alerts page), independent of any external configuration:
 
 - **Outsized whale payments** — every newly-recorded whale payment, severity-banded by how many
@@ -201,6 +202,10 @@ table (visible on the dashboard's Alerts page), independent of any external conf
   fluctuates constantly in normal operation, so this deliberately only fires on a sudden, large drop
   rather than every decrease; a pool's first-ever snapshot never alerts, since there's nothing yet to
   compare it against.
+- **Token holder-count drops** — an issued asset's holder count (`num_accounts`) falling by at least
+  `HOLDER_DROP_THRESHOLD_PCT` versus the previous ingest cycle (`WARNING`, or `CRITICAL` at 2x the
+  threshold). Same rationale as pool liquidity drops: holder count fluctuates in normal operation, so
+  this only fires on a sudden, large drop, and an asset's first-ever snapshot never alerts.
 
 Set `ALERT_WEBHOOK_URL` to also push `WARNING`+ alerts (configurable via `ALERT_MIN_SEVERITY`) to a
 Slack-compatible incoming webhook. Webhook delivery is best-effort: a failure is logged and never
