@@ -90,6 +90,11 @@ async fn run_once(
     let assets = horizon.assets(10).await?;
     tracing::info!("fetched {} assets", assets.len());
 
+    // Reloaded once per cycle (not once per row): fresh enough to react to a
+    // rule an operator just added via `/alert-rules` within one poll
+    // interval, without a DB round-trip per pool/asset/payment.
+    let rules = db::list_alert_rules(pool).await.unwrap_or_default();
+
     // One transaction for this cycle's pool/token/price writes. Committing
     // each row separately (the original approach) means one fsync per row —
     // fine at 200 rows, but pagination can now bring in thousands, and a
@@ -114,7 +119,7 @@ async fn run_once(
     }
 
     for a in &assets {
-        match ingest_token(&mut tx, now, a, config.holder_drop_threshold_pct).await {
+        match ingest_token(&mut tx, now, a, config.holder_drop_threshold_pct, &rules).await {
             Ok(Some(alert)) => pending_alerts.push(alert),
             Ok(None) => {}
             Err(e) => tracing::warn!("skipping asset {}:{}: {e:?}", a.asset_code, a.asset_issuer),
@@ -139,7 +144,7 @@ async fn run_once(
         }
     }
 
-    ingest_payments(pool, horizon, http, config).await?;
+    ingest_payments(pool, horizon, http, config, &rules).await?;
 
     Ok(())
 }
@@ -154,12 +159,9 @@ async fn ingest_payments(
     horizon: &HorizonClient,
     http: &reqwest::Client,
     config: &Config,
+    rules: &[AlertRuleRow],
 ) -> anyhow::Result<()> {
     let cursor = db::get_ingest_cursor(pool, PAYMENTS_CURSOR_KEY).await?;
-    // Reloaded once per cycle (not once per payment): fresh enough to react
-    // to a rule an operator just added via `/alert-rules` within one poll
-    // interval, without a DB round-trip per payment.
-    let rules = db::list_alert_rules(pool).await.unwrap_or_default();
 
     let Some(cursor) = cursor else {
         let latest = horizon.latest_payments_page(1).await?;
@@ -189,8 +191,7 @@ async fn ingest_payments(
     let mut pending_alerts = Vec::new();
     let mut last_cursor = cursor;
     for p in &payments {
-        if let Some(alert) =
-            ingest_whale_payment(&mut tx, p, config.whale_threshold, &rules).await?
+        if let Some(alert) = ingest_whale_payment(&mut tx, p, config.whale_threshold, rules).await?
         {
             pending_alerts.push(alert);
         }
@@ -378,17 +379,26 @@ async fn ingest_pool(
 }
 
 /// Ingests one asset's snapshot and, if its holder count (`num_accounts`)
-/// dropped by at least `holder_drop_threshold_pct` versus the last snapshot
-/// on record, returns a pending alert (deferred until after `tx.commit()`,
-/// same reason as the other alert kinds — see `PendingAlert`). An asset seen
-/// for the first time this cycle has nothing to compare against, so it
-/// never alerts on its first snapshot.
+/// dropped by at least the effective holder-drop threshold (an enabled
+/// `holder_drop_pct` rule for this asset, or `default_holder_drop_threshold_pct`
+/// — see `alert_rules::resolve_holder_drop_threshold_pct`) versus the last
+/// snapshot on record, returns a pending alert (deferred until after
+/// `tx.commit()`, same reason as the other alert kinds — see
+/// `PendingAlert`). An asset seen for the first time this cycle has nothing
+/// to compare against, so it never alerts on its first snapshot.
 async fn ingest_token(
     tx: &mut sqlx::PgConnection,
     now: chrono::DateTime<Utc>,
     a: &AssetRecord,
-    holder_drop_threshold_pct: Decimal,
+    default_holder_drop_threshold_pct: Decimal,
+    rules: &[AlertRuleRow],
 ) -> anyhow::Result<Option<PendingAlert>> {
+    let holder_drop_threshold_pct = alert_rules::resolve_holder_drop_threshold_pct(
+        rules,
+        &a.asset_code,
+        Some(a.asset_issuer.as_str()),
+        default_holder_drop_threshold_pct,
+    );
     let amount = Decimal::from_str(&a.balances.authorized).unwrap_or_default();
 
     let previous_num_accounts =

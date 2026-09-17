@@ -8,6 +8,12 @@ import { fmtTime, truncateMiddle } from "../format";
 
 const SEVERITIES = ["INFO", "WARNING", "CRITICAL"];
 
+const RULE_TYPE_LABEL: Record<AlertRuleType, string> = {
+  whale_threshold: "Whale threshold",
+  holder_drop_pct: "Holder-drop %",
+  ltv_band: "LTV band",
+};
+
 export function AlertSettings() {
   const channels = usePolled(() => api.alertChannels(), []);
   const rules = usePolled(() => api.alertRules(), []);
@@ -17,8 +23,9 @@ export function AlertSettings() {
       <div className="page-header">
         <h1 className="page-title">Alert Rules &amp; Channels</h1>
         <p className="page-subtitle">
-          Configure per-asset whale-payment thresholds, custom liquidation-risk bands, and extra
-          delivery channels (Slack/Discord/generic webhooks) without a redeploy. <Link to="/alerts">Back to Alerts</Link>.
+          Configure per-asset whale-payment thresholds, per-asset holder-drop thresholds, custom
+          liquidation-risk bands, and extra delivery channels (Slack/Discord/generic webhooks)
+          without a redeploy. <Link to="/alerts">Back to Alerts</Link>.
         </p>
       </div>
 
@@ -206,6 +213,7 @@ function RulesPanel({
   const [threshold, setThreshold] = useState("");
   const [submitting, setSubmitting] = useState(false);
   const [formError, setFormError] = useState<string | null>(null);
+  const isAssetScoped = ruleType === "whale_threshold" || ruleType === "holder_drop_pct";
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -215,8 +223,8 @@ function RulesPanel({
       await api.createAlertRule({
         name: ruleType === "ltv_band" ? name.toUpperCase() : name || `${assetCode} threshold`,
         rule_type: ruleType,
-        asset_code: ruleType === "whale_threshold" ? assetCode : null,
-        asset_issuer: ruleType === "whale_threshold" && assetIssuer ? assetIssuer : null,
+        asset_code: isAssetScoped ? assetCode : null,
+        asset_issuer: isAssetScoped && assetIssuer ? assetIssuer : null,
         threshold,
         enabled: true,
       });
@@ -260,9 +268,9 @@ function RulesPanel({
             {rules.map((r) => (
               <tr key={r.id}>
                 <td>{r.name}</td>
-                <td>{r.rule_type === "whale_threshold" ? "Whale threshold" : "LTV band"}</td>
+                <td>{RULE_TYPE_LABEL[r.rule_type as AlertRuleType]}</td>
                 <td className="mono">
-                  {r.rule_type === "whale_threshold"
+                  {r.rule_type === "whale_threshold" || r.rule_type === "holder_drop_pct"
                     ? `${r.asset_code ?? "—"}${r.asset_issuer ? `:${truncateMiddle(r.asset_issuer, 4, 4)}` : ""}`
                     : r.name}
                 </td>
@@ -284,8 +292,9 @@ function RulesPanel({
             {rules.length === 0 && (
               <tr>
                 <td colSpan={6}>
-                  No overrides configured. Whale payments use WHALE_THRESHOLD and liquidation risk
-                  uses the default 70/85/95 LTV bands until a rule is added here.
+                  No overrides configured. Whale payments use WHALE_THRESHOLD, holder-drop alerts
+                  use HOLDER_DROP_THRESHOLD_PCT, and liquidation risk uses the default 70/85/95 LTV
+                  bands until a rule is added here.
                 </td>
               </tr>
             )}
@@ -296,9 +305,10 @@ function RulesPanel({
       <form className="toolbar" onSubmit={submit}>
         <select value={ruleType} onChange={(e) => setRuleType(e.target.value as AlertRuleType)}>
           <option value="whale_threshold">Whale threshold override</option>
+          <option value="holder_drop_pct">Holder-drop % override</option>
           <option value="ltv_band">LTV band override</option>
         </select>
-        {ruleType === "whale_threshold" ? (
+        {isAssetScoped ? (
           <>
             <input
               type="text"
@@ -326,7 +336,13 @@ function RulesPanel({
         )}
         <input
           type="number"
-          placeholder={ruleType === "whale_threshold" ? "Threshold amount" : "LTV %"}
+          placeholder={
+            ruleType === "whale_threshold"
+              ? "Threshold amount"
+              : ruleType === "holder_drop_pct"
+                ? "Drop %"
+                : "LTV %"
+          }
           value={threshold}
           onChange={(e) => setThreshold(e.target.value)}
           required

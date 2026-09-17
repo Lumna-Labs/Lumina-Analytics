@@ -231,6 +231,10 @@ the dashboard's Alerts page has a "Manage rules & channels" panel backed by `/al
   `ALERT_WEBHOOK_URL`, independently — one channel's failure never blocks another.
 - **Whale-threshold rules**: override `WHALE_THRESHOLD` for one specific asset (code + issuer, or
   native XLM). An asset with no matching rule keeps using the global default.
+- **Holder-drop-percent rules**: override `HOLDER_DROP_THRESHOLD_PCT` for one specific asset (code +
+  issuer), same targeting as whale-threshold rules — useful for a thinly-held token whose holder
+  count is naturally noisier (or a major stablecoin where you want a tighter threshold) than the
+  global default suits.
 - **LTV-band rules**: override one named risk-band cutoff (`MEDIUM`, `HIGH`, or `CRITICAL`,
   default 70/85/95% LTV). Applied consistently to both the `/liquidations` risk-bucket summary and
   the ingester's upward-crossing alert detection, so the dashboard and the alerts it fires always

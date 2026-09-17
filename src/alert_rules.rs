@@ -30,6 +30,27 @@ pub fn resolve_whale_threshold(
         .unwrap_or(default)
 }
 
+/// Picks the holder-drop alert threshold (a percent) for one asset: an
+/// enabled `holder_drop_pct` rule matching this exact asset (code + issuer,
+/// where `None` issuer means native XLM — though XLM has no meaningful
+/// "holder count" via this path in practice) overrides `default`. Same
+/// most-recent-wins tiebreak as `resolve_whale_threshold`.
+pub fn resolve_holder_drop_threshold_pct(
+    rules: &[AlertRuleRow],
+    asset_code: &str,
+    asset_issuer: Option<&str>,
+    default: Decimal,
+) -> Decimal {
+    rules
+        .iter()
+        .filter(|r| r.enabled && r.rule_type == "holder_drop_pct")
+        .filter(|r| r.asset_code.as_deref() == Some(asset_code))
+        .filter(|r| r.asset_issuer.as_deref() == asset_issuer)
+        .max_by_key(|r| r.id)
+        .map(|r| r.threshold)
+        .unwrap_or(default)
+}
+
 /// LTV percentage cutoffs for each risk band. Defaults match the values
 /// `logic::risk_level` used to hardcode (70/85/95) before this module
 /// existed.
@@ -112,6 +133,25 @@ mod tests {
         }
     }
 
+    fn holder_drop_rule(
+        id: i64,
+        code: &str,
+        issuer: Option<&str>,
+        threshold: &str,
+        enabled: bool,
+    ) -> AlertRuleRow {
+        AlertRuleRow {
+            id,
+            name: format!("rule-{id}"),
+            rule_type: "holder_drop_pct".to_string(),
+            asset_code: Some(code.to_string()),
+            asset_issuer: issuer.map(str::to_string),
+            threshold: dec(threshold),
+            enabled,
+            created_at: Utc::now(),
+        }
+    }
+
     fn band_rule(id: i64, name: &str, threshold: &str, enabled: bool) -> AlertRuleRow {
         AlertRuleRow {
             id,
@@ -179,6 +219,42 @@ mod tests {
         assert_eq!(
             resolve_whale_threshold(&rules, "USDC", Some("G"), dec("10000")),
             dec("2000")
+        );
+    }
+
+    #[test]
+    fn holder_drop_falls_back_to_default_with_no_matching_rule() {
+        let rules = vec![holder_drop_rule(1, "USDC", Some("GISSUER"), "10", true)];
+        assert_eq!(
+            resolve_holder_drop_threshold_pct(&rules, "SHIB", Some("GOTHER"), dec("20")),
+            dec("20")
+        );
+    }
+
+    #[test]
+    fn holder_drop_matching_rule_overrides_default() {
+        let rules = vec![holder_drop_rule(1, "USDC", Some("GISSUER"), "10", true)];
+        assert_eq!(
+            resolve_holder_drop_threshold_pct(&rules, "USDC", Some("GISSUER"), dec("20")),
+            dec("10")
+        );
+    }
+
+    #[test]
+    fn holder_drop_disabled_rule_is_ignored() {
+        let rules = vec![holder_drop_rule(1, "USDC", Some("GISSUER"), "10", false)];
+        assert_eq!(
+            resolve_holder_drop_threshold_pct(&rules, "USDC", Some("GISSUER"), dec("20")),
+            dec("20")
+        );
+    }
+
+    #[test]
+    fn holder_drop_does_not_match_a_whale_threshold_rule_on_the_same_asset() {
+        let rules = vec![whale_rule(1, "USDC", Some("GISSUER"), "5000", true)];
+        assert_eq!(
+            resolve_holder_drop_threshold_pct(&rules, "USDC", Some("GISSUER"), dec("20")),
+            dec("20")
         );
     }
 

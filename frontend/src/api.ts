@@ -165,7 +165,7 @@ export interface AlertChannel {
   created_at: string;
 }
 
-export type AlertRuleType = "whale_threshold" | "ltv_band";
+export type AlertRuleType = "whale_threshold" | "holder_drop_pct" | "ltv_band";
 
 export interface AlertRule {
   id: number;

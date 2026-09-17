@@ -132,9 +132,9 @@ pub async fn create_alert_rule(
         return bad_request("threshold must be greater than zero");
     }
     match body.rule_type.as_str() {
-        "whale_threshold" => {
+        "whale_threshold" | "holder_drop_pct" => {
             if body.asset_code.is_none() {
-                return bad_request("whale_threshold rules require asset_code");
+                return bad_request(&format!("{} rules require asset_code", body.rule_type));
             }
         }
         "ltv_band" => {
@@ -142,7 +142,11 @@ pub async fn create_alert_rule(
                 return bad_request("ltv_band rules must be named MEDIUM, HIGH, or CRITICAL");
             }
         }
-        _ => return bad_request("rule_type must be one of: whale_threshold, ltv_band"),
+        _ => {
+            return bad_request(
+                "rule_type must be one of: whale_threshold, holder_drop_pct, ltv_band",
+            )
+        }
     }
     match db::insert_alert_rule(
         &state.db,
