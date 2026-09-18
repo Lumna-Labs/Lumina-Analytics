@@ -235,6 +235,10 @@ the dashboard's Alerts page has a "Manage rules & channels" panel backed by `/al
   issuer), same targeting as whale-threshold rules — useful for a thinly-held token whose holder
   count is naturally noisier (or a major stablecoin where you want a tighter threshold) than the
   global default suits.
+- **Liquidity-drop-percent rules**: override `LIQUIDITY_DROP_THRESHOLD_PCT` for one specific pool.
+  Pools have no code/issuer pair like assets do, so this rule type targets a pool by ID (stored in
+  the same `asset_code` column) instead — useful for a thin, low-volume pool whose `total_shares`
+  swings more than the global default tolerates.
 - **LTV-band rules**: override one named risk-band cutoff (`MEDIUM`, `HIGH`, or `CRITICAL`,
   default 70/85/95% LTV). Applied consistently to both the `/liquidations` risk-bucket summary and
   the ingester's upward-crossing alert detection, so the dashboard and the alerts it fires always

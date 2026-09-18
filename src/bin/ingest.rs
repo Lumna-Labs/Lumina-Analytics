@@ -105,7 +105,15 @@ async fn run_once(
 
     let mut pending_alerts = Vec::new();
     for lp in &pools {
-        match ingest_pool(&mut tx, now, lp, config.liquidity_drop_threshold_pct).await {
+        match ingest_pool(
+            &mut tx,
+            now,
+            lp,
+            config.liquidity_drop_threshold_pct,
+            &rules,
+        )
+        .await
+        {
             Ok(Some(alert)) => pending_alerts.push(alert),
             Ok(None) => {}
             Err(e) => tracing::warn!("skipping pool {}: {e:?}", lp.id),
@@ -309,17 +317,25 @@ async fn ingest_prices(
 }
 
 /// Ingests one pool's snapshot and, if its `total_shares` dropped by at
-/// least `liquidity_drop_threshold_pct` versus the last snapshot on record,
-/// returns a pending alert (deferred until after `tx.commit()`, same reason
-/// as whale-payment alerts — see `PendingAlert`). A pool seen for the first
-/// time this cycle has nothing to compare against, so it never alerts on its
-/// first snapshot.
+/// least the effective liquidity-drop threshold (an enabled
+/// `liquidity_drop_pct` rule for this pool, or `default_liquidity_drop_threshold_pct`
+/// — see `alert_rules::resolve_liquidity_drop_threshold_pct`) versus the last
+/// snapshot on record, returns a pending alert (deferred until after
+/// `tx.commit()`, same reason as whale-payment alerts — see
+/// `PendingAlert`). A pool seen for the first time this cycle has nothing to
+/// compare against, so it never alerts on its first snapshot.
 async fn ingest_pool(
     tx: &mut sqlx::PgConnection,
     now: chrono::DateTime<Utc>,
     lp: &LiquidityPool,
-    liquidity_drop_threshold_pct: Decimal,
+    default_liquidity_drop_threshold_pct: Decimal,
+    rules: &[AlertRuleRow],
 ) -> anyhow::Result<Option<PendingAlert>> {
+    let liquidity_drop_threshold_pct = alert_rules::resolve_liquidity_drop_threshold_pct(
+        rules,
+        &lp.id,
+        default_liquidity_drop_threshold_pct,
+    );
     let (asset_a, asset_b) = match (lp.reserves.first(), lp.reserves.get(1)) {
         (Some(a), Some(b)) => (a, b),
         _ => anyhow::bail!("pool {} has fewer than 2 reserves", lp.id),

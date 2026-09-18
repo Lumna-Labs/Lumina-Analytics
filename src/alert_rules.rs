@@ -51,6 +51,26 @@ pub fn resolve_holder_drop_threshold_pct(
         .unwrap_or(default)
 }
 
+/// Picks the liquidity-drop alert threshold (a percent) for one pool: an
+/// enabled `liquidity_drop_pct` rule targeting this pool overrides `default`.
+/// Pools have no code/issuer pair like assets do, so this rule type matches
+/// on `asset_code` alone, repurposed to hold the pool ID (`asset_issuer` is
+/// left `None` and ignored). Same most-recent-wins tiebreak as
+/// `resolve_whale_threshold`.
+pub fn resolve_liquidity_drop_threshold_pct(
+    rules: &[AlertRuleRow],
+    pool_id: &str,
+    default: Decimal,
+) -> Decimal {
+    rules
+        .iter()
+        .filter(|r| r.enabled && r.rule_type == "liquidity_drop_pct")
+        .filter(|r| r.asset_code.as_deref() == Some(pool_id))
+        .max_by_key(|r| r.id)
+        .map(|r| r.threshold)
+        .unwrap_or(default)
+}
+
 /// LTV percentage cutoffs for each risk band. Defaults match the values
 /// `logic::risk_level` used to hardcode (70/85/95) before this module
 /// existed.
@@ -146,6 +166,19 @@ mod tests {
             rule_type: "holder_drop_pct".to_string(),
             asset_code: Some(code.to_string()),
             asset_issuer: issuer.map(str::to_string),
+            threshold: dec(threshold),
+            enabled,
+            created_at: Utc::now(),
+        }
+    }
+
+    fn liquidity_drop_rule(id: i64, pool_id: &str, threshold: &str, enabled: bool) -> AlertRuleRow {
+        AlertRuleRow {
+            id,
+            name: format!("rule-{id}"),
+            rule_type: "liquidity_drop_pct".to_string(),
+            asset_code: Some(pool_id.to_string()),
+            asset_issuer: None,
             threshold: dec(threshold),
             enabled,
             created_at: Utc::now(),
@@ -255,6 +288,45 @@ mod tests {
         assert_eq!(
             resolve_holder_drop_threshold_pct(&rules, "USDC", Some("GISSUER"), dec("20")),
             dec("20")
+        );
+    }
+
+    #[test]
+    fn liquidity_drop_falls_back_to_default_with_no_matching_rule() {
+        let rules = vec![liquidity_drop_rule(1, "pool-a", "40", true)];
+        assert_eq!(
+            resolve_liquidity_drop_threshold_pct(&rules, "pool-b", dec("30")),
+            dec("30")
+        );
+    }
+
+    #[test]
+    fn liquidity_drop_matching_rule_overrides_default() {
+        let rules = vec![liquidity_drop_rule(1, "pool-a", "40", true)];
+        assert_eq!(
+            resolve_liquidity_drop_threshold_pct(&rules, "pool-a", dec("30")),
+            dec("40")
+        );
+    }
+
+    #[test]
+    fn liquidity_drop_disabled_rule_is_ignored() {
+        let rules = vec![liquidity_drop_rule(1, "pool-a", "40", false)];
+        assert_eq!(
+            resolve_liquidity_drop_threshold_pct(&rules, "pool-a", dec("30")),
+            dec("30")
+        );
+    }
+
+    #[test]
+    fn liquidity_drop_most_recent_matching_rule_wins() {
+        let rules = vec![
+            liquidity_drop_rule(1, "pool-a", "40", true),
+            liquidity_drop_rule(2, "pool-a", "50", true),
+        ];
+        assert_eq!(
+            resolve_liquidity_drop_threshold_pct(&rules, "pool-a", dec("30")),
+            dec("50")
         );
     }
 

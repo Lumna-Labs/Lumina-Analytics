@@ -137,6 +137,14 @@ pub async fn create_alert_rule(
                 return bad_request(&format!("{} rules require asset_code", body.rule_type));
             }
         }
+        // Pools have no code/issuer pair, so this rule type repurposes
+        // `asset_code` to hold the pool ID instead — see
+        // `alert_rules::resolve_liquidity_drop_threshold_pct`.
+        "liquidity_drop_pct" => {
+            if body.asset_code.is_none() {
+                return bad_request("liquidity_drop_pct rules require asset_code (the pool ID)");
+            }
+        }
         "ltv_band" => {
             if !["MEDIUM", "HIGH", "CRITICAL"].contains(&body.name.to_ascii_uppercase().as_str()) {
                 return bad_request("ltv_band rules must be named MEDIUM, HIGH, or CRITICAL");
@@ -144,7 +152,7 @@ pub async fn create_alert_rule(
         }
         _ => {
             return bad_request(
-                "rule_type must be one of: whale_threshold, holder_drop_pct, ltv_band",
+                "rule_type must be one of: whale_threshold, holder_drop_pct, liquidity_drop_pct, ltv_band",
             )
         }
     }
